@@ -2,15 +2,13 @@
 
 //! # Mine Game
 //!
-//! A single-player guessing game where the player competes against a deterministic
-//! house guess generated on-chain.
+//! Session bootstrap contract for Mine Game.
 //!
 //! **Game Hub Integration:**
-//! This game is Game Hub-aware and enforces all games to be played through the
-//! Game Hub contract. Games cannot be started or completed without points involvement.
+//! This game is Game Hub-aware and starts sessions through the Game Hub contract.
 
 use soroban_sdk::{
-    Address, Bytes, BytesN, Env, IntoVal, contract, contractclient, contracterror, contractimpl, contracttype, vec
+    Address, BytesN, Env, IntoVal, contract, contractclient, contracterror, contractimpl, contracttype, vec
 };
 
 // Import GameHub contract interface
@@ -27,11 +25,6 @@ pub trait GameHub {
         player2_points: i128,
     );
 
-    fn end_game(
-        env: Env,
-        session_id: u32,
-        player1_won: bool
-    );
 }
 
 // ============================================================================
@@ -43,10 +36,6 @@ pub trait GameHub {
 #[repr(u32)]
 pub enum Error {
     GameNotFound = 1,
-    NotPlayer = 2,
-    AlreadyGuessed = 3,
-    PlayerGuessMissing = 4,
-    GameAlreadyEnded = 5,
 }
 
 // ============================================================================
@@ -57,13 +46,7 @@ pub enum Error {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Game {
     pub player1: Address,
-    pub player2: Address,
     pub player1_points: i128,
-    pub player2_points: i128,
-    pub player1_guess: Option<u32>,
-    pub player2_guess: Option<u32>,
-    pub winning_number: Option<u32>,
-    pub winner: Option<Address>,
 }
 
 #[contracttype]
@@ -154,16 +137,10 @@ impl MineGameContract {
             &house_points,
         );
 
-        // Create game (winning_number not set yet - will be generated in reveal_winner)
+        // Persist the minimal session context for this phase.
         let game = Game {
             player1: player1.clone(),
-            player2: house_player,
             player1_points,
-            player2_points: house_points,
-            player1_guess: None,
-            player2_guess: None,
-            winning_number: None,
-            winner: None,
         };
 
         // Store game in temporary storage with 30-day TTL
@@ -180,161 +157,13 @@ impl MineGameContract {
         Ok(())
     }
 
-    /// Make a guess for the current game.
-    /// The player can guess a number between 1 and 10.
-    ///
-    /// # Arguments
-    /// * `session_id` - The session ID of the game
-    /// * `player` - Address of the player making the guess
-    /// * `guess` - The guessed number (1-10)
-    pub fn make_guess(env: Env, session_id: u32, player: Address, guess: u32) -> Result<(), Error> {
-        player.require_auth();
-
-        // Validate guess is in range
-        if guess < 1 || guess > 10 {
-            panic!("Guess must be between 1 and 10");
-        }
-
-        // Get game from temporary storage
-        let key = DataKey::Game(session_id);
-        let mut game: Game = env
-            .storage()
-            .temporary()
-            .get(&key)
-            .ok_or(Error::GameNotFound)?;
-
-        // Check game is still active (no winner yet)
-        if game.winner.is_some() {
-            return Err(Error::GameAlreadyEnded);
-        }
-
-        // Single-player mode: only player1 can guess.
-        if player != game.player1 {
-            return Err(Error::NotPlayer);
-        }
-        if game.player1_guess.is_some() {
-            return Err(Error::AlreadyGuessed);
-        }
-        game.player1_guess = Some(guess);
-
-        // Store updated game in temporary storage
-        env.storage().temporary().set(&key, &game);
-        env.storage()
-            .temporary()
-            .extend_ttl(&key, GAME_TTL_LEDGERS, GAME_TTL_LEDGERS);
-
-        // No event emitted - game state can be queried via get_game()
-
-        Ok(())
-    }
-
-    /// Reveal the winner of the game and submit outcome to GameHub.
-    /// Can only be called after the player has made a guess.
-    /// This generates both the winning number and a deterministic house guess.
-    ///
-    /// # Arguments
-    /// * `session_id` - The session ID of the game
-    ///
-    /// # Returns
-    /// * `Address` - Address of the winning player
-    pub fn reveal_winner(env: Env, session_id: u32) -> Result<Address, Error> {
-        // Get game from temporary storage
-        let key = DataKey::Game(session_id);
-        let mut game: Game = env
-            .storage()
-            .temporary()
-            .get(&key)
-            .ok_or(Error::GameNotFound)?;
-
-        // Check if game already ended (has a winner)
-        if let Some(winner) = &game.winner {
-            return Ok(winner.clone());
-        }
-
-        // Check player has guessed
-        let guess1 = game.player1_guess.ok_or(Error::PlayerGuessMissing)?;
-
-        // Generate random winning number between 1 and 10 using seeded PRNG
-        // This is done AFTER both players have committed their guesses
-        //
-        // Seed components (all deterministic and identical between sim/submit):
-        // 1. Session ID - unique per game, same between simulation and submission
-        // 2. Player address - committed before reveal, same between sim/submit
-        // 3. Player guess - committed before reveal, same between sim/submit
-        //
-        // Note: We do NOT include ledger sequence or timestamp because those differ
-        // between simulation and submission, which would cause different winners.
-        //
-        // This ensures same result between simulation and submission.
-
-        // Build deterministic seed bytes
-        let mut fixed_data = [0u8; 8];
-        fixed_data[0..4].copy_from_slice(&session_id.to_be_bytes());
-        fixed_data[4..8].copy_from_slice(&guess1.to_be_bytes());
-
-        let mut seed_bytes = Bytes::from_array(&env, &fixed_data);
-        seed_bytes.append(&game.player1.to_string().to_bytes());
-
-        let seed = env.crypto().keccak256(&seed_bytes);
-        env.prng().seed(seed.into());
-        let winning_number = env.prng().gen_range::<u64>(1..=10) as u32;
-        let house_guess = env.prng().gen_range::<u64>(1..=10) as u32;
-        game.winning_number = Some(winning_number);
-        game.player2_guess = Some(house_guess);
-
-        // Calculate distances
-        let distance1 = if guess1 > winning_number {
-            guess1 - winning_number
-        } else {
-            winning_number - guess1
-        };
-
-        let distance2 = if house_guess > winning_number {
-            house_guess - winning_number
-        } else {
-            winning_number - house_guess
-        };
-
-        // Determine winner (if equal distance, player1 wins)
-        let winner = if distance1 <= distance2 {
-            game.player1.clone()
-        } else {
-            game.player2.clone()
-        };
-
-        // Update game with winner (this marks the game as ended)
-        game.winner = Some(winner.clone());
-        env.storage().temporary().set(&key, &game);
-        env.storage()
-            .temporary()
-            .extend_ttl(&key, GAME_TTL_LEDGERS, GAME_TTL_LEDGERS);
-
-        // Get GameHub address
-        let game_hub_addr: Address = env
-            .storage()
-            .instance()
-            .get(&DataKey::GameHubAddress)
-            .expect("GameHub address not set");
-
-        // Create GameHub client
-        let game_hub = GameHubClient::new(&env, &game_hub_addr);
-
-        // Call GameHub to end the session
-        // This unlocks points and updates standings
-        // Event emitted by the Game Hub contract (GameEnded)
-        let player1_won = winner == game.player1; // true if player1 won, false if player2 won
-        game_hub.end_game(&session_id, &player1_won);
-
-        Ok(winner)
-    }
-
     /// Get game information.
     ///
     /// # Arguments
     /// * `session_id` - The session ID of the game
     ///
     /// # Returns
-    /// * `Game` - The game state (includes winning number after game ends)
+    /// * `Game` - The stored session context
     pub fn get_game(env: Env, session_id: u32) -> Result<Game, Error> {
         let key = DataKey::Game(session_id);
         env.storage()

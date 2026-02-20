@@ -20,8 +20,6 @@ impl MockGameHub {
     ) {
     }
 
-    pub fn end_game(_env: Env, _session_id: u32, _player1_won: bool) {}
-
     pub fn add_game(_env: Env, _game_address: Address) {}
 }
 
@@ -60,54 +58,36 @@ fn assert_contract_error<T, E>(
 }
 
 #[test]
-fn test_single_player_complete_game() {
+fn test_start_and_get_game_state() {
     let (_env, client, _admin, player) = setup_test();
-
     let session_id = 1u32;
-    client.start_game(&session_id, &player, &player, &100_0000000, &100_0000000);
-    client.make_guess(&session_id, &player, &5);
-    let winner = client.reveal_winner(&session_id);
+    let points = 100_0000000i128;
+    client.start_game(&session_id, &player, &player, &points, &0i128);
 
     let game = client.get_game(&session_id);
     assert_eq!(game.player1, player);
-    assert!(game.player2 != player);
-    assert_eq!(game.player2_points, 0);
-    assert_eq!(game.player1_guess, Some(5));
-    assert!(game.player2_guess.is_some());
-    assert!(game.winning_number.is_some());
-    assert_eq!(game.winner, Some(winner));
+    assert_eq!(game.player1_points, points);
 }
 
 #[test]
-fn test_player_cannot_guess_twice() {
-    let (_env, client, _admin, player) = setup_test();
-    let session_id = 2u32;
-
-    client.start_game(&session_id, &player, &player, &100_0000000, &100_0000000);
-    client.make_guess(&session_id, &player, &7);
-    let result = client.try_make_guess(&session_id, &player, &8);
-    assert_contract_error(&result, Error::AlreadyGuessed);
+fn test_get_game_not_found() {
+    let (_env, client, _admin, _player) = setup_test();
+    let missing_session_id = 999u32;
+    let result = client.try_get_game(&missing_session_id);
+    assert_contract_error(&result, Error::GameNotFound);
 }
 
 #[test]
-fn test_reveal_requires_player_guess() {
-    let (_env, client, _admin, player) = setup_test();
-    let session_id = 3u32;
+fn test_set_and_get_admin_and_hub() {
+    let (env, client, _admin, _player) = setup_test();
+    let new_admin = Address::generate(&env);
+    let new_hub = Address::generate(&env);
 
-    client.start_game(&session_id, &player, &player, &100_0000000, &100_0000000);
-    let result = client.try_reveal_winner(&session_id);
-    assert_contract_error(&result, Error::PlayerGuessMissing);
-}
+    client.set_admin(&new_admin);
+    assert_eq!(client.get_admin(), new_admin);
 
-#[test]
-fn test_non_player_cannot_guess() {
-    let (env, client, _admin, player) = setup_test();
-    let stranger = Address::generate(&env);
-    let session_id = 4u32;
-
-    client.start_game(&session_id, &player, &player, &100_0000000, &100_0000000);
-    let result = client.try_make_guess(&session_id, &stranger, &5);
-    assert_contract_error(&result, Error::NotPlayer);
+    client.set_hub(&new_hub);
+    assert_eq!(client.get_hub(), new_hub);
 }
 
 #[test]
