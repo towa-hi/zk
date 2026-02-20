@@ -101,6 +101,28 @@ export class MineGameService {
   }
 
   /**
+   * Start a single-player game.
+   * Player 2 parameters are ignored by the contract in single-player mode.
+   */
+  async startSinglePlayer(
+    sessionId: number,
+    player: string,
+    playerPoints: bigint,
+    signer: Pick<contract.ClientOptions, 'signTransaction' | 'signAuthEntry'>,
+    authTtlMinutes?: number
+  ) {
+    return this.startGame(
+      sessionId,
+      player,
+      player,
+      playerPoints,
+      0n,
+      signer,
+      authTtlMinutes
+    );
+  }
+
+  /**
    * STEP 1 (Player 1): Prepare a start game transaction and export signed auth entry
    * - Creates transaction with Player 2 as the transaction source
    * - Simulates to get auth entries

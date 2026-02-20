@@ -1,9 +1,9 @@
 #![no_std]
 
-//! # Mine Game Game
+//! # Mine Game
 //!
-//! A simple two-player guessing game where players guess a number between 1 and 10.
-//! The player whose guess is closest to the randomly generated number wins.
+//! A single-player guessing game where the player competes against a deterministic
+//! house guess generated on-chain.
 //!
 //! **Game Hub Integration:**
 //! This game is Game Hub-aware and enforces all games to be played through the
@@ -45,7 +45,7 @@ pub enum Error {
     GameNotFound = 1,
     NotPlayer = 2,
     AlreadyGuessed = 3,
-    BothPlayersNotGuessed = 4,
+    PlayerGuessMissing = 4,
     GameAlreadyEnded = 5,
 }
 
@@ -106,7 +106,7 @@ impl MineGameContract {
             .set(&DataKey::GameHubAddress, &game_hub);
     }
 
-    /// Start a new game between two players with points.
+    /// Start a new single-player game with points.
     /// This creates a session in the Game Hub and locks points before starting the game.
     ///
     /// **CRITICAL:** This method requires authorization from THIS contract (not players).
@@ -115,25 +115,23 @@ impl MineGameContract {
     /// # Arguments
     /// * `session_id` - Unique session identifier (u32)
     /// * `player1` - Address of first player
-    /// * `player2` - Address of second player
-    /// * `player1_points` - Points amount committed by player 1
-    /// * `player2_points` - Points amount committed by player 2
+    /// * `player2` - Ignored for single-player mode (kept for ABI compatibility)
+    /// * `player1_points` - Points amount committed by player
+    /// * `player2_points` - Ignored for single-player mode (kept for ABI compatibility)
     pub fn start_game(
         env: Env,
         session_id: u32,
         player1: Address,
-        player2: Address,
+        _player2: Address,
         player1_points: i128,
-        player2_points: i128,
+        _player2_points: i128,
     ) -> Result<(), Error> {
-        // Prevent self-play: Player 1 and Player 2 must be different
-        if player1 == player2 {
-            panic!("Cannot play against yourself: Player 1 and Player 2 must be different addresses");
-        }
-
-        // Require authentication from both players (they consent to committing points)
+        // Single-player mode only needs player auth.
         player1.require_auth_for_args(vec![&env, session_id.into_val(&env), player1_points.into_val(&env)]);
-        player2.require_auth_for_args(vec![&env, session_id.into_val(&env), player2_points.into_val(&env)]);
+
+        // Represent the house as this contract address in the game and hub session.
+        let house_player = env.current_contract_address();
+        let house_points = 0i128;
 
         // Get GameHub address
         let game_hub_addr: Address = env
@@ -151,17 +149,17 @@ impl MineGameContract {
             &env.current_contract_address(),
             &session_id,
             &player1,
-            &player2,
+            &house_player,
             &player1_points,
-            &player2_points,
+            &house_points,
         );
 
         // Create game (winning_number not set yet - will be generated in reveal_winner)
         let game = Game {
             player1: player1.clone(),
-            player2: player2.clone(),
+            player2: house_player,
             player1_points,
-            player2_points,
+            player2_points: house_points,
             player1_guess: None,
             player2_guess: None,
             winning_number: None,
@@ -183,7 +181,7 @@ impl MineGameContract {
     }
 
     /// Make a guess for the current game.
-    /// Players can guess a number between 1 and 10.
+    /// The player can guess a number between 1 and 10.
     ///
     /// # Arguments
     /// * `session_id` - The session ID of the game
@@ -210,23 +208,20 @@ impl MineGameContract {
             return Err(Error::GameAlreadyEnded);
         }
 
-        // Update guess for the appropriate player
-        if player == game.player1 {
-            if game.player1_guess.is_some() {
-                return Err(Error::AlreadyGuessed);
-            }
-            game.player1_guess = Some(guess);
-        } else if player == game.player2 {
-            if game.player2_guess.is_some() {
-                return Err(Error::AlreadyGuessed);
-            }
-            game.player2_guess = Some(guess);
-        } else {
+        // Single-player mode: only player1 can guess.
+        if player != game.player1 {
             return Err(Error::NotPlayer);
         }
+        if game.player1_guess.is_some() {
+            return Err(Error::AlreadyGuessed);
+        }
+        game.player1_guess = Some(guess);
 
         // Store updated game in temporary storage
         env.storage().temporary().set(&key, &game);
+        env.storage()
+            .temporary()
+            .extend_ttl(&key, GAME_TTL_LEDGERS, GAME_TTL_LEDGERS);
 
         // No event emitted - game state can be queried via get_game()
 
@@ -234,8 +229,8 @@ impl MineGameContract {
     }
 
     /// Reveal the winner of the game and submit outcome to GameHub.
-    /// Can only be called after both players have made their guesses.
-    /// This generates the winning number, determines the winner, and ends the session.
+    /// Can only be called after the player has made a guess.
+    /// This generates both the winning number and a deterministic house guess.
     ///
     /// # Arguments
     /// * `session_id` - The session ID of the game
@@ -256,41 +251,36 @@ impl MineGameContract {
             return Ok(winner.clone());
         }
 
-        // Check both players have guessed
-        let guess1 = game.player1_guess.ok_or(Error::BothPlayersNotGuessed)?;
-        let guess2 = game.player2_guess.ok_or(Error::BothPlayersNotGuessed)?;
+        // Check player has guessed
+        let guess1 = game.player1_guess.ok_or(Error::PlayerGuessMissing)?;
 
         // Generate random winning number between 1 and 10 using seeded PRNG
         // This is done AFTER both players have committed their guesses
         //
         // Seed components (all deterministic and identical between sim/submit):
         // 1. Session ID - unique per game, same between simulation and submission
-        // 2. Player addresses - both players contribute, same between sim/submit
-        // 3. Guesses - committed before reveal, same between sim/submit
+        // 2. Player address - committed before reveal, same between sim/submit
+        // 3. Player guess - committed before reveal, same between sim/submit
         //
         // Note: We do NOT include ledger sequence or timestamp because those differ
         // between simulation and submission, which would cause different winners.
         //
-        // This ensures:
-        // - Same result between simulation and submission (fully deterministic)
-        // - Cannot be easily gamed (both players contribute to randomness)
+        // This ensures same result between simulation and submission.
 
-        // Build seed more efficiently using native arrays where possible
-        // Total: 12 bytes of fixed data (session_id + 2 guesses)
-        let mut fixed_data = [0u8; 12];
+        // Build deterministic seed bytes
+        let mut fixed_data = [0u8; 8];
         fixed_data[0..4].copy_from_slice(&session_id.to_be_bytes());
         fixed_data[4..8].copy_from_slice(&guess1.to_be_bytes());
-        fixed_data[8..12].copy_from_slice(&guess2.to_be_bytes());
 
-        // Only use Bytes for the final concatenation with player addresses
         let mut seed_bytes = Bytes::from_array(&env, &fixed_data);
         seed_bytes.append(&game.player1.to_string().to_bytes());
-        seed_bytes.append(&game.player2.to_string().to_bytes());
 
         let seed = env.crypto().keccak256(&seed_bytes);
         env.prng().seed(seed.into());
         let winning_number = env.prng().gen_range::<u64>(1..=10) as u32;
+        let house_guess = env.prng().gen_range::<u64>(1..=10) as u32;
         game.winning_number = Some(winning_number);
+        game.player2_guess = Some(house_guess);
 
         // Calculate distances
         let distance1 = if guess1 > winning_number {
@@ -299,10 +289,10 @@ impl MineGameContract {
             winning_number - guess1
         };
 
-        let distance2 = if guess2 > winning_number {
-            guess2 - winning_number
+        let distance2 = if house_guess > winning_number {
+            house_guess - winning_number
         } else {
-            winning_number - guess2
+            winning_number - house_guess
         };
 
         // Determine winner (if equal distance, player1 wins)
@@ -315,6 +305,9 @@ impl MineGameContract {
         // Update game with winner (this marks the game as ended)
         game.winner = Some(winner.clone());
         env.storage().temporary().set(&key, &game);
+        env.storage()
+            .temporary()
+            .extend_ttl(&key, GAME_TTL_LEDGERS, GAME_TTL_LEDGERS);
 
         // Get GameHub address
         let game_hub_addr: Address = env
