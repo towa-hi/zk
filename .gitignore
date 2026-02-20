@@ -39,3 +39,7 @@ frontend-template/*.tsbuildinfo
 # OS
 .DS_Store
 Thumbs.db
+
+# Local AI guidance docs
+AGENTS.md
+CLAUDE.md
