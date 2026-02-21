@@ -54,6 +54,8 @@ Async competitive single-player game. Players customize a probe, navigate a proc
 
 - Probe enters at root and navigates the tree by picking branches
 - You can go backwards but you get nothing from revisited biomes
+- Revisited biomes still apply damage when entered again
+- The starting node is damage-exempt (no damage when on or re-entering it)
 - Every move costs 1 fuel
 - Entering a new biome makes you endure its conditions (damage is always applied)
 - You choose whether to extract resources or pass through without collecting
@@ -87,7 +89,7 @@ hull -= total_damage
 - Cargo capacity forces choices — once full you can't collect more, do you push deeper or evacuate now?
 - Fuel vs hull: running out of either ends your run — biomes drain hull, movement drains fuel
 - Build tradeoffs: fuel tanks, resistance, cargo bays, and extractors all compete for weight
-- Backtracking is safe but wastes fuel for no reward
+- Backtracking still costs fuel, applies damage on re-entry, and gives no reward
 - Every branch choice is: push deeper or retreat toward evacuation?
 
 ---

@@ -46,7 +46,7 @@ describe('headless move resolution', () => {
     expect(result.state.moveResults).toHaveLength(1);
   });
 
-  it('revisit by moving back up is safe and gives no resources', () => {
+  it('revisit of the start node is damage-exempt and gives no resources', () => {
     const state = createExploreState('revisit-seed');
     const down = applyEngineAction(state, {
       type: 'move',
@@ -63,6 +63,31 @@ describe('headless move resolution', () => {
     const last = backUp.state.moveResults[backUp.state.moveResults.length - 1];
     expect(last.toNodeId).toBe(1);
     expect(last.damageTaken).toBe(0);
+    expect(last.resourcesGained).toBe(0);
+  });
+
+  it('revisit of non-start nodes still applies damage and gives no resources', () => {
+    const state = createExploreState('non-start-revisit-seed');
+    const firstDown = applyEngineAction(state, {
+      type: 'move',
+      direction: 'left',
+      extract: true,
+    }).state;
+    const secondDown = applyEngineAction(firstDown, {
+      type: 'move',
+      direction: 'left',
+      extract: true,
+    }).state;
+    const revisitParent = applyEngineAction(secondDown, {
+      type: 'move',
+      direction: 'up',
+      extract: true,
+    });
+
+    expect(revisitParent.ok).toBe(true);
+    const last = revisitParent.state.moveResults[revisitParent.state.moveResults.length - 1];
+    expect(last.toNodeId).toBe(2);
+    expect(last.damageTaken).toBeGreaterThan(0);
     expect(last.resourcesGained).toBe(0);
   });
 

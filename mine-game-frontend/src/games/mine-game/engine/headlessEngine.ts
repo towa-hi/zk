@@ -198,10 +198,12 @@ function handleMove(state: EngineState, direction: 'left' | 'right' | 'up', extr
   }
 
   const isFirstVisit = !state.visitedNodeIds.includes(toNodeId);
+  const startNodeId = state.visitedNodeIds[0] ?? 1;
+  const isStartNode = toNodeId === startNodeId;
   const fuelAfter = Math.max(0, state.fuel - 1);
 
-  // Revisited nodes are intentionally safe/no-reward to align with "backtracking is safe."
-  const damageTaken = isFirstVisit ? computeNodeDamage(targetNode.hazards, targetNode.intensity, stats.resistances) : 0;
+  // Damage applies on every entered node except the node the run started on.
+  const damageTaken = isStartNode ? 0 : computeNodeDamage(targetNode.hazards, targetNode.intensity, stats.resistances);
   const hullAfter = Math.max(0, state.hull - damageTaken);
   const resourcesCandidate =
     isFirstVisit && extract ? computeNodeResources(targetNode.hazards, targetNode.intensity, stats.extractors) : 0;
