@@ -1,5 +1,20 @@
 # AGENTS.md
 
+## Project-Specific Instructions (mine-game / Stellar Explorer)
+
+This section is user-defined and takes precedence for `contracts/mine-game/` work.
+Use it to differentiate current project objectives from the pre-written studio template below.
+
+- Objective: build `Stellar Explorer` (probe loadout + biome tree exploration + ZK proof submission), not Minesweeper/Minecraft.
+- End-state flow: players commit a hidden loadout, explore Planet Alpha, then submit a ZK proof to Stellar for verification.
+- Privacy requirement: verification must confirm run correctness without revealing private loadout details.
+- Source of truth: `stellar-explorer-design.md` is the authoritative product/design spec.
+- Always include `stellar-explorer-design.md` in context before planning or implementing any `mine-game` contract/frontend changes.
+- If implementation details conflict, follow `stellar-explorer-design.md` over older game assumptions in this file.
+- Keep following the existing Soroban + Game Hub conventions in this file unless they conflict with the design document above.
+
+---
+
 This repo is the Stellar Game Studio. Use this guide when building or updating games so AI tools can navigate the repo and follow the expected Soroban + frontend patterns.
 
 **Repo Map**
