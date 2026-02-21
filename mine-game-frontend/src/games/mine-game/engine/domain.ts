@@ -145,7 +145,13 @@ export interface ProofPayload {
   commitment: string;
   moveCount: number;
   moves: MoveCommand[];
+  resourcesPerMove: number[];
+  totalResources: number;
+  finalHull: number;
+  finalFuel: number;
+  finalCargo: number;
   outcome: RunOutcome;
+  evacuationIntensity: 1 | 2 | 3 | null;
 }
 
 export interface EngineTransitionResult {

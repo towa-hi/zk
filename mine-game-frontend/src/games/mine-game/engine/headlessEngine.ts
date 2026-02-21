@@ -3,6 +3,7 @@ import {
   BASE_FUEL,
   BASE_HULL,
   CARGO_BY_TIER,
+  EVACUATION_PERCENT_BY_INTENSITY,
   EXTRACTOR_MULTIPLIER_BY_TIER,
   FUEL_BY_TIER,
   HAZARD_TYPES,
@@ -20,6 +21,7 @@ import {
   createDefaultLoadout,
   getBuildPreview,
 } from './domain';
+import { computeCommitment } from './commitment';
 import { generatePlanet } from './planet';
 
 export interface CreateEngineStateInput {
@@ -84,9 +86,9 @@ export function applyEngineAction(state: EngineState, action: EngineAction): Eng
     case 'move':
       return handleMove(state, action.direction, action.extract);
     case 'evacuate':
-      return fail(state, 'not_implemented', 'Evacuation resolution is scheduled for Milestone 3');
+      return handleEvacuate(state);
     case 'request_proof_payload':
-      return fail(state, 'not_implemented', 'Proof payload shaping is scheduled for Milestone 5');
+      return handleRequestProofPayload(state);
     default:
       return fail(state, 'invalid_action', 'Unsupported action');
   }
@@ -149,7 +151,7 @@ function handleConfirmBuild(state: EngineState, salt: string): EngineTransitionR
   }
 
   const stats = deriveProbeStats(state.loadout);
-  const commitment = computeStubCommitment(state.loadout, salt);
+  const commitment = computeCommitment(state.loadout, salt);
 
   return ok({
     ...state,
@@ -247,13 +249,79 @@ function handleMove(state: EngineState, direction: 'left' | 'right' | 'up', extr
     nextState = {
       ...nextState,
       outcome: 'jettisoned',
-      phase: 'done',
+      phase: 'prove',
       resources: keptResources,
       cargo: keptResources,
     };
   }
 
   return ok(nextState);
+}
+
+function handleEvacuate(state: EngineState): EngineTransitionResult {
+  if (state.phase !== 'explore') {
+    return fail(state, 'invalid_phase', 'Evacuate can only be applied during explore phase');
+  }
+  if (state.outcome !== 'in_progress') {
+    return fail(state, 'terminal_state', 'Run is no longer active');
+  }
+  if (state.fuel <= 0) {
+    return fail(state, 'terminal_state', 'Cannot evacuate without fuel');
+  }
+
+  const currentNode = state.planet.nodes[state.currentNodeId - 1];
+  if (!currentNode) {
+    return fail(state, 'invalid_input', `Current node ${state.currentNodeId} does not exist`);
+  }
+
+  const keepPercent = EVACUATION_PERCENT_BY_INTENSITY[currentNode.intensity];
+  const keptResources = Math.floor((state.resources * keepPercent) / 100);
+  const fuelAfter = Math.max(0, state.fuel - 1);
+
+  return ok({
+    ...state,
+    outcome: 'evacuated',
+    phase: 'prove',
+    fuel: fuelAfter,
+    resources: keptResources,
+    cargo: keptResources,
+  });
+}
+
+function handleRequestProofPayload(state: EngineState): EngineTransitionResult {
+  if (state.phase !== 'prove') {
+    return fail(state, 'invalid_phase', 'Proof payload can only be requested during prove phase');
+  }
+  if (!state.commitment) {
+    return fail(state, 'invalid_input', 'Cannot generate proof payload without commitment');
+  }
+
+  const evacuationIntensity =
+    state.outcome === 'evacuated' ? (state.planet.nodes[state.currentNodeId - 1]?.intensity ?? null) : null;
+
+  const payload = {
+    sessionId: state.sessionId,
+    planetSeed: state.planetSeed,
+    commitment: state.commitment,
+    moveCount: state.moveCount,
+    moves: state.moves,
+    resourcesPerMove: state.moveResults.map((entry) => entry.resourcesGained),
+    totalResources: state.resources,
+    finalHull: state.hull,
+    finalFuel: state.fuel,
+    finalCargo: state.cargo,
+    outcome: state.outcome,
+    evacuationIntensity,
+  };
+
+  return {
+    ok: true,
+    state: {
+      ...state,
+      phase: 'done',
+    },
+    proofPayload: payload,
+  };
 }
 
 function deriveProbeStats(loadout: Loadout): ProbeStats {
@@ -312,19 +380,6 @@ function computeNodeResources(
   const second = base * extractors[hazards[1]];
   const total = first + second;
   return hazards[0] === hazards[1] ? total * 2 : total;
-}
-
-function computeStubCommitment(loadout: Loadout, salt: string): string {
-  const payload = JSON.stringify({
-    loadout,
-    salt,
-  });
-  let hash = 0;
-  for (let i = 0; i < payload.length; i += 1) {
-    hash = (hash << 5) - hash + payload.charCodeAt(i);
-    hash |= 0;
-  }
-  return `stub_${Math.abs(hash).toString(16)}`;
 }
 
 function ok(state: EngineState): EngineTransitionResult {

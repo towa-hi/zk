@@ -109,10 +109,47 @@ describe('headless move resolution', () => {
     }
 
     expect(state.outcome).toBe('jettisoned');
-    expect(state.phase).toBe('done');
+    expect(state.phase).toBe('prove');
     expect(state.fuel).toBe(0);
     expect(state.resources).toBe(
       Math.floor((lastPreJettisonResources + state.moveResults[state.moveResults.length - 1].resourcesGained) * JETTISON_KEEP_PERCENT / 100)
     );
+  });
+
+  it('evacuates from current node, applies intensity multiplier, and enters prove phase', () => {
+    const state = createExploreState('evacuate-seed');
+    const afterMove = applyEngineAction(state, {
+      type: 'move',
+      direction: 'left',
+      extract: true,
+    }).state;
+    const beforeEvacResources = afterMove.resources;
+    const currentIntensity = afterMove.planet.nodes[afterMove.currentNodeId - 1].intensity;
+    const keepPercent = currentIntensity === 1 ? 25 : currentIntensity === 2 ? 50 : 100;
+
+    const evacuated = applyEngineAction(afterMove, { type: 'evacuate' });
+    expect(evacuated.ok).toBe(true);
+    expect(evacuated.state.outcome).toBe('evacuated');
+    expect(evacuated.state.phase).toBe('prove');
+    expect(evacuated.state.fuel).toBe(afterMove.fuel - 1);
+    expect(evacuated.state.resources).toBe(Math.floor((beforeEvacResources * keepPercent) / 100));
+  });
+
+  it('returns proof payload in prove phase and transitions to done', () => {
+    const state = createExploreState('proof-seed');
+    const afterMove = applyEngineAction(state, {
+      type: 'move',
+      direction: 'left',
+      extract: true,
+    }).state;
+    const evacuated = applyEngineAction(afterMove, { type: 'evacuate' }).state;
+
+    const proof = applyEngineAction(evacuated, { type: 'request_proof_payload' });
+    expect(proof.ok).toBe(true);
+    expect(proof.proofPayload).toBeDefined();
+    expect(proof.proofPayload?.outcome).toBe('evacuated');
+    expect(proof.proofPayload?.totalResources).toBe(evacuated.resources);
+    expect(proof.proofPayload?.resourcesPerMove).toHaveLength(evacuated.moveResults.length);
+    expect(proof.state.phase).toBe('done');
   });
 });

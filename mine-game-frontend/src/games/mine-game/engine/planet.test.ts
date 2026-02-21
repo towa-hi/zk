@@ -29,4 +29,12 @@ describe('planet generation', () => {
     expect(last.depth).toBe(6);
     expect(last.intensity).toBe(3);
   });
+
+  it('changes biome layout when seed changes', () => {
+    const a = generatePlanet('seed-a');
+    const b = generatePlanet('seed-b');
+    const aSignature = a.nodes.slice(0, 10).map((n) => n.biomeType).join('|');
+    const bSignature = b.nodes.slice(0, 10).map((n) => n.biomeType).join('|');
+    expect(aSignature).not.toBe(bSignature);
+  });
 });
