@@ -49,6 +49,28 @@ export function createMineGameEngineAdapter(
         sessionId: snapshot.sessionId,
         phase: snapshot.phase,
         loading: false,
+        planetNodes: state.planet.nodes.map((n) => ({
+          id: n.id,
+          depth: n.depth,
+          intensity: n.intensity,
+          biomeType: n.biomeType,
+          hazards: [...n.hazards] as [string, string],
+        })),
+        explore: {
+          currentNodeId: state.currentNodeId,
+          visitedNodeIds: [...state.visitedNodeIds],
+          hull: state.hull,
+          fuel: state.fuel,
+          cargo: state.cargo,
+          resources: state.resources,
+          maxCargo: state.stats?.maxCargo ?? 100,
+          resistances: state.stats
+            ? { ...state.stats.resistances }
+            : { heat: 0, cold: 0, bio: 0, rad: 0 },
+          extractors: state.stats
+            ? { ...state.stats.extractors }
+            : { heat: 10, cold: 10, bio: 10, rad: 10 },
+        },
         build: {
           loadout: state.loadout,
           totalWeight: snapshot.buildPreview.totalWeight,

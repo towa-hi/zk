@@ -171,6 +171,39 @@ export function MineGameGame({
     );
   };
 
+  const moveToNode = (targetNodeId: number, extract: boolean) => {
+    if (loading) return;
+    const currentId = engineAdapter.getEngineState().currentNodeId;
+    let direction: 'left' | 'right' | 'up';
+    if (targetNodeId === currentId * 2) direction = 'left';
+    else if (targetNodeId === currentId * 2 + 1) direction = 'right';
+    else if (targetNodeId === Math.floor(currentId / 2) && currentId > 1) direction = 'up';
+    else return;
+
+    const resultBundle = engineAdapter.applyAction({ type: 'move', direction, extract });
+    setNotice(resultBundle.notice);
+    setViewState(engineAdapter.getViewState());
+    setEngineStateJson(JSON.stringify(engineAdapter.getEngineState(), null, 2));
+    appendDebugLine(
+      resultBundle.result.ok
+        ? `Moved ${direction} to node ${targetNodeId} (extract=${extract})`
+        : `Move rejected (${resultBundle.result.error?.code ?? 'unknown'})`
+    );
+  };
+
+  const evacuate = () => {
+    if (loading) return;
+    const resultBundle = engineAdapter.applyAction({ type: 'evacuate' });
+    setNotice(resultBundle.notice);
+    setViewState(engineAdapter.getViewState());
+    setEngineStateJson(JSON.stringify(engineAdapter.getEngineState(), null, 2));
+    appendDebugLine(
+      resultBundle.result.ok
+        ? `Evacuated`
+        : `Evacuate rejected (${resultBundle.result.error?.code ?? 'unknown'})`
+    );
+  };
+
   const surfacedState: MineGameViewState = {
     ...viewState,
     loading,
@@ -180,6 +213,8 @@ export function MineGameGame({
     goToNextPhase,
     resetScreens,
     setPartTier,
+    moveToNode,
+    evacuate,
   };
 
   return (

@@ -1,11 +1,14 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type {
+  ExploreViewState,
   LoadoutCategory,
   MineGameSurfaceProps,
   PartTier,
+  PlanetNodeView,
   ResistancePartTier,
 } from './GameSurface.types';
 import { ATTACHMENT_POINTS } from './ProbeBlueprint';
+import { BiomeTree } from './BiomeTree';
 
 type TierChoice = PartTier | ResistancePartTier;
 
@@ -74,18 +77,100 @@ function toTitleCase(value: string): string {
     .join(' ');
 }
 
+const HAZARD_LABEL: Record<string, string> = {
+  heat: 'Heat',
+  cold: 'Cold',
+  bio: 'Bio',
+  rad: 'Rad',
+};
+
+const RESOURCE_BASE: Record<number, number> = { 1: 1, 2: 3, 3: 5 };
+const BASE_DAMAGE = 1;
+
+interface MovePreview {
+  hullBefore: number;
+  hullAfter: number;
+  fuelBefore: number;
+  fuelAfter: number;
+  damageByType: { type: string; damage: number }[];
+  totalDamage: number;
+  resourcesAvailable: number;
+  isVisited: boolean;
+  isStartNode: boolean;
+  isCurrent: boolean;
+}
+
+function computeMovePreview(
+  node: PlanetNodeView,
+  explore: ExploreViewState,
+): MovePreview {
+  const isCurrent = node.id === explore.currentNodeId;
+  const isVisited = explore.visitedNodeIds.includes(node.id);
+  const isStartNode = node.id === (explore.visitedNodeIds[0] ?? 1);
+
+  const grouped: Record<string, number> = {};
+  for (const h of node.hazards) {
+    const dmg = isStartNode
+      ? 0
+      : Math.max(0, BASE_DAMAGE + (node.intensity - 1) - (explore.resistances[h] ?? 0));
+    grouped[h] = (grouped[h] ?? 0) + dmg;
+  }
+  const damageByType = Object.entries(grouped).map(([type, damage]) => ({ type, damage }));
+  const totalDamage = damageByType.reduce((s, d) => s + d.damage, 0);
+
+  let resourcesAvailable = 0;
+  if (!isVisited) {
+    const base = RESOURCE_BASE[node.intensity] ?? 0;
+    const ext0 = explore.extractors[node.hazards[0]] ?? 10;
+    const ext1 = explore.extractors[node.hazards[1]] ?? 10;
+    resourcesAvailable = base * ext0 + base * ext1;
+    if (node.hazards[0] === node.hazards[1]) resourcesAvailable *= 2;
+  }
+
+  return {
+    hullBefore: explore.hull,
+    hullAfter: Math.max(0, explore.hull - totalDamage),
+    fuelBefore: explore.fuel,
+    fuelAfter: Math.max(0, explore.fuel - 1),
+    damageByType,
+    totalDamage,
+    resourcesAvailable,
+    isVisited,
+    isStartNode,
+    isCurrent,
+  };
+}
+
 export function MineGameSurface(props: MineGameSurfaceProps) {
   const [isDebugVisible, setIsDebugVisible] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState<LoadoutCategory>('fuel_tank');
+  const [selectedNodeId, setSelectedNodeId] = useState<number | null>(null);
 
   const { phase, loading } = props.state;
   const buildState = props.state.build;
+  const explore = props.state.explore;
 
   useEffect(() => {
     if (phase !== 'build') {
       setSelectedCategory('fuel_tank');
     }
   }, [phase]);
+
+  useEffect(() => {
+    if (explore?.currentNodeId != null) {
+      setSelectedNodeId(explore.currentNodeId);
+    }
+  }, [explore?.currentNodeId]);
+
+  const selectedNode = useMemo(() => {
+    if (selectedNodeId == null || !props.state.planetNodes) return null;
+    return props.state.planetNodes.find((n) => n.id === selectedNodeId) ?? null;
+  }, [selectedNodeId, props.state.planetNodes]);
+
+  const movePreview = useMemo(() => {
+    if (!selectedNode || !explore) return null;
+    return computeMovePreview(selectedNode, explore);
+  }, [selectedNode, explore]);
 
   const phaseTitle =
     phase === 'build'
@@ -239,15 +324,137 @@ export function MineGameSurface(props: MineGameSurfaceProps) {
                   </div>
                 </div>
               </div>
-            ) : phase === 'explore' && buildState ? (
-              <div className="w-full h-full py-3 min-h-0">
-                <div className="h-full min-h-0 rounded-lg border border-green-900/30 bg-white/70 p-4 text-green-950">
-                  <p className="text-xs tracking-[0.2em] font-semibold">STELLAR EXPLORER</p>
-                  <h2 className="mt-2 text-2xl font-black">EXPLORE SCREEN</h2>
-                  <p className="mt-2 text-sm text-green-950/85">
-                    Probe visualization removed from this screen.
-                  </p>
+            ) : phase === 'explore' && props.state.planetNodes && explore ? (
+              <div className="w-full h-full py-1.5 px-3 min-h-0 flex flex-col gap-1.5">
+                <div className="flex-1 min-h-0 flex items-center justify-center">
+                  <BiomeTree
+                    nodes={props.state.planetNodes}
+                    currentNodeId={explore.currentNodeId}
+                    visitedNodeIds={explore.visitedNodeIds}
+                    selectedNodeId={selectedNodeId ?? undefined}
+                    onSelectNode={setSelectedNodeId}
+                  />
                 </div>
+
+                {selectedNode && movePreview && (
+                  <div className="shrink-0 grid grid-cols-3 gap-1.5">
+                    <div className="rounded border border-green-900/30 bg-white/70 px-2 py-1.5 text-green-950">
+                      <p className="text-[10px] tracking-[0.15em] font-semibold opacity-60">SELECTED BIOME</p>
+                      <p className="text-xs font-bold mt-0.5">{toTitleCase(selectedNode.biomeType)}</p>
+                      <p className="text-[11px] opacity-75">
+                        Depth {selectedNode.depth} &middot; Intensity {selectedNode.intensity}
+                      </p>
+                      <p className="text-[11px] opacity-75">
+                        Hazards: {selectedNode.hazards.map((h) => HAZARD_LABEL[h] ?? h).join(', ')}
+                      </p>
+                      {movePreview.isCurrent && (
+                        <p className="text-[10px] font-semibold text-purple-700 mt-0.5">You are here</p>
+                      )}
+                      {movePreview.isVisited && !movePreview.isCurrent && (
+                        <p className="text-[10px] font-semibold text-amber-600 mt-0.5">Already visited</p>
+                      )}
+                    </div>
+
+                    <div className="rounded border border-green-900/30 bg-white/70 px-2 py-1.5 text-green-950 flex flex-col overflow-hidden">
+                      <p className="text-[10px] tracking-[0.15em] font-semibold opacity-60 shrink-0">
+                        {movePreview.isCurrent ? 'CURRENT STATS' : 'MOVE PREVIEW'}
+                      </p>
+                      <div className="mt-1 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0 text-[11px] min-h-0 overflow-auto">
+                        <span>Hull</span>
+                        {movePreview.isCurrent ? (
+                          <span className="text-right font-semibold">{movePreview.hullBefore}</span>
+                        ) : (
+                          <span className="text-right font-semibold">
+                            {movePreview.hullBefore}
+                            <span className={movePreview.totalDamage > 0 ? ' text-red-600' : ''}>
+                              {' → '}{movePreview.hullAfter}
+                            </span>
+                          </span>
+                        )}
+
+                        <span>Fuel</span>
+                        {movePreview.isCurrent ? (
+                          <span className="text-right font-semibold">{movePreview.fuelBefore}</span>
+                        ) : (
+                          <span className="text-right font-semibold">
+                            {movePreview.fuelBefore}
+                            <span className=" text-red-600">{' → '}{movePreview.fuelAfter}</span>
+                          </span>
+                        )}
+
+                        {!movePreview.isCurrent && movePreview.damageByType.map((d) => (
+                          <span key={d.type} className="contents">
+                            <span className="text-red-700/80">Dmg {HAZARD_LABEL[d.type] ?? d.type}</span>
+                            <span className="text-right font-semibold text-red-700/80">{d.damage}</span>
+                          </span>
+                        ))}
+
+                        {!movePreview.isCurrent && movePreview.resourcesAvailable > 0 && (
+                          <span className="contents">
+                            <span className="text-emerald-700">Resources</span>
+                            <span className="text-right font-semibold text-emerald-700">
+                              +{movePreview.resourcesAvailable}
+                            </span>
+                          </span>
+                        )}
+
+                        {movePreview.isCurrent && (
+                          <>
+                            <span>Cargo</span>
+                            <span className="text-right font-semibold">
+                              {explore.cargo} / {explore.maxCargo}
+                            </span>
+                            <span>Resources</span>
+                            <span className="text-right font-semibold">{explore.resources}</span>
+                          </>
+                        )}
+                      </div>
+                    </div>
+
+                    {(() => {
+                      const noFuel = explore.fuel <= 0;
+                      const isAdj = selectedNodeId != null
+                        && selectedNodeId !== explore.currentNodeId
+                        && (selectedNodeId === explore.currentNodeId * 2
+                          || selectedNodeId === explore.currentNodeId * 2 + 1
+                          || (selectedNodeId === Math.floor(explore.currentNodeId / 2) && explore.currentNodeId > 1));
+                      const moveDisabled = movePreview.isCurrent || noFuel || !isAdj || loading;
+                      const evacDisabled = movePreview.isCurrent || noFuel || loading;
+
+                      return (
+                        <div className="rounded border border-green-900/30 bg-white/70 px-2 py-1.5 text-green-950 flex flex-col">
+                          <p className="text-[10px] tracking-[0.15em] font-semibold opacity-60">ACTIONS</p>
+                          <div className="mt-1 flex-1 min-h-0 flex flex-col gap-1">
+                            <button
+                              type="button"
+                              className="w-full h-[20px] rounded text-[10px] leading-none font-semibold border border-red-400/60 bg-red-50 text-red-700 px-1 flex items-center justify-center disabled:opacity-35 disabled:cursor-not-allowed"
+                              disabled={evacDisabled}
+                              onClick={() => props.actions.evacuate()}
+                            >
+                              Ditch Probe
+                            </button>
+                            <button
+                              type="button"
+                              className="w-full h-[20px] rounded text-[10px] leading-none font-semibold border border-purple-400/60 bg-purple-50 text-purple-700 px-1 flex items-center justify-center disabled:opacity-35 disabled:cursor-not-allowed"
+                              disabled={moveDisabled}
+                              onClick={() => selectedNodeId != null && props.actions.moveToNode(selectedNodeId, false)}
+                            >
+                              Move Only
+                            </button>
+                            <button
+                              type="button"
+                              className="w-full h-[20px] rounded text-[10px] leading-none font-semibold border border-emerald-400/60 bg-emerald-50 text-emerald-700 px-1 flex items-center justify-center disabled:opacity-35 disabled:cursor-not-allowed"
+                              disabled={moveDisabled}
+                              onClick={() => selectedNodeId != null && props.actions.moveToNode(selectedNodeId, true)}
+                            >
+                              Move & Extract
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })()}
+                  </div>
+                )}
               </div>
             ) : (
               <div className="text-center max-w-xl">
