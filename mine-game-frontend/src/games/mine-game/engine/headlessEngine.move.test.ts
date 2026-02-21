@@ -147,9 +147,12 @@ describe('headless move resolution', () => {
     const proof = applyEngineAction(evacuated, { type: 'request_proof_payload' });
     expect(proof.ok).toBe(true);
     expect(proof.proofPayload).toBeDefined();
-    expect(proof.proofPayload?.outcome).toBe('evacuated');
-    expect(proof.proofPayload?.totalResources).toBe(evacuated.resources);
-    expect(proof.proofPayload?.resourcesPerMove).toHaveLength(evacuated.moveResults.length);
+    expect(proof.proofPayload?.publicInputs.numMoves).toBe(evacuated.moveCount);
+    expect(proof.proofPayload?.publicInputs.evacuated).toBe(true);
+    expect(proof.proofPayload?.publicInputs.moves).toHaveLength(10);
+    expect(proof.proofPayload?.publicOutputs.outcome).toBe(0);
+    expect(proof.proofPayload?.publicOutputs.totalResources).toBe(evacuated.resources);
+    expect(proof.proofPayload?.publicOutputs.resourcesPerNode).toHaveLength(10);
     expect(proof.state.phase).toBe('done');
   });
 });

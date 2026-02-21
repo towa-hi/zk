@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
-import type { MineGameActions, MineGameViewState } from './GameSurface.types';
+import type { MineGameActions, MineGameViewState, UiNotice } from './GameSurface.types';
 import { MineGameSurface } from './MineGameSurface';
+import { createMineGameEngineAdapter } from './mineGameEngineAdapter';
+import { createMineGameContractAdapter } from './mineGameContractAdapter';
 
 const createRandomSessionId = (): number => {
   if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
@@ -20,13 +22,28 @@ interface MineGameGameProps {
   onGameComplete: () => void;
 }
 
+const createPlanetSeed = (sessionId: number): string => `ui-seed-${sessionId}`;
+
 export function MineGameGame({
   userAddress,
   onGameComplete,
 }: MineGameGameProps) {
   const [sessionId, setSessionId] = useState<number>(() => createRandomSessionId());
-  const [phase, setPhase] = useState<MineGameViewState['phase']>('build');
   const [loading, setLoading] = useState(false);
+  const [notice, setNotice] = useState<UiNotice | null>(null);
+  const [proofJson, setProofJson] = useState<string | null>(null);
+  const [engineStateJson, setEngineStateJson] = useState<string>('');
+  const [engineAdapter, setEngineAdapter] = useState(() =>
+    createMineGameEngineAdapter({
+      sessionId,
+      userAddress,
+      planetSeed: createPlanetSeed(sessionId),
+    })
+  );
+  const [contractAdapter, setContractAdapter] = useState(() =>
+    createMineGameContractAdapter()
+  );
+  const [viewState, setViewState] = useState<MineGameViewState>(() => engineAdapter.getViewState());
   const [debugLines, setDebugLines] = useState<string[]>([]);
 
   const appendDebugLine = (message: string, sessionOverride?: number) => {
@@ -38,43 +55,89 @@ export function MineGameGame({
   };
 
   useEffect(() => {
+    setEngineStateJson(JSON.stringify(engineAdapter.getEngineState(), null, 2));
+    setViewState(engineAdapter.getViewState());
     appendDebugLine('Entered BUILD screen');
   }, []);
 
-  const goToNextPhase = () => {
+  const goToNextPhase = async () => {
     if (loading) return;
     setLoading(true);
-    appendDebugLine(`Transition requested from ${phase.toUpperCase()}`);
+    const phase = engineAdapter.getViewState().phase;
+    appendDebugLine(`Engine action requested from ${phase.toUpperCase()}`);
 
-    if (phase === 'build') {
-      setPhase('explore');
-      appendDebugLine('Entered EXPLORE screen');
-      setLoading(false);
-      return;
+    const resultBundle =
+      phase === 'build'
+        ? engineAdapter.applyAction({ type: 'confirm_build', salt: `ui-auto-${Date.now()}` })
+        : phase === 'explore'
+          ? engineAdapter.applyAction({ type: 'evacuate' })
+          : phase === 'prove'
+            ? engineAdapter.applyAction({ type: 'request_proof_payload' })
+            : null;
+
+    if (resultBundle) {
+      setNotice(resultBundle.notice);
+      setViewState(engineAdapter.getViewState());
+      setEngineStateJson(JSON.stringify(engineAdapter.getEngineState(), null, 2));
+      const proofPayload = engineAdapter.getProofPayload();
+      setProofJson(proofPayload ? JSON.stringify(proofPayload, null, 2) : null);
+      appendDebugLine(
+        resultBundle.result.ok
+          ? `Action applied; now in ${engineAdapter.getViewState().phase.toUpperCase()}`
+          : `Action rejected (${resultBundle.result.error?.code ?? 'unknown'})`
+      );
+      if (resultBundle.result.ok && phase === 'prove' && engineAdapter.getViewState().phase === 'done') {
+        onGameComplete();
+      }
+
+      if (resultBundle.result.ok && phase === 'build') {
+        const commitResult = await contractAdapter.commitLoadout({
+          sessionId,
+          playerAddress: userAddress,
+          commitment: engineAdapter.getEngineState().commitment,
+        });
+        appendDebugLine(`Contract commit: ${commitResult.status} (${commitResult.message})`);
+        if (!commitResult.ok) {
+          setNotice({
+            tone: 'error',
+            message: commitResult.message,
+          });
+        }
+      }
+
+      if (resultBundle.result.ok && phase === 'prove') {
+        const submitResult = await contractAdapter.submitProof({
+          sessionId,
+          playerAddress: userAddress,
+          payload: engineAdapter.getProofPayload(),
+        });
+        appendDebugLine(`Contract proof submit: ${submitResult.status} (${submitResult.message})`);
+        if (!submitResult.ok) {
+          setNotice({
+            tone: 'error',
+            message: submitResult.message,
+          });
+        }
+      }
     }
-
-    if (phase === 'explore') {
-      setPhase('prove');
-      appendDebugLine('Entered PROVE screen');
-      setLoading(false);
-      return;
-    }
-
-    if (phase === 'prove') {
-      setPhase('done');
-      appendDebugLine('Entered DONE screen');
-      onGameComplete();
-      setLoading(false);
-      return;
-    }
-
     setLoading(false);
   };
 
   const resetScreens = () => {
     const nextSessionId = createRandomSessionId();
+    const nextAdapter = createMineGameEngineAdapter({
+      sessionId: nextSessionId,
+      userAddress,
+      planetSeed: createPlanetSeed(nextSessionId),
+    });
+    const nextContractAdapter = createMineGameContractAdapter();
+    setEngineAdapter(nextAdapter);
+    setContractAdapter(nextContractAdapter);
     setSessionId(nextSessionId);
-    setPhase('build');
+    setViewState(nextAdapter.getViewState());
+    setEngineStateJson(JSON.stringify(nextAdapter.getEngineState(), null, 2));
+    setProofJson(null);
+    setNotice(null);
     setLoading(false);
     const time = new Date().toLocaleTimeString();
     const createdLine = `${time} Session ${nextSessionId} created`;
@@ -84,9 +147,8 @@ export function MineGameGame({
     setDebugLines([createdLine, resetLine]);
   };
 
-  const viewState: MineGameViewState = {
-    sessionId,
-    phase,
+  const surfacedState: MineGameViewState = {
+    ...viewState,
     loading,
   };
 
@@ -98,9 +160,10 @@ export function MineGameGame({
   return (
     <MineGameSurface
       userAddress={userAddress}
-      state={viewState}
+      state={surfacedState}
       actions={actions}
-      debugText={`Session ${sessionId} • ${phase.toUpperCase()} SCREEN\n${debugLines.join('\n')}`}
+      notice={notice}
+      debugText={`Session ${sessionId} • ${surfacedState.phase.toUpperCase()} SCREEN\n${debugLines.join('\n')}\n\nENGINE STATE\n${engineStateJson}\n\nPROOF PAYLOAD\n${proofJson ?? '(none yet)'}`}
     />
   );
 }

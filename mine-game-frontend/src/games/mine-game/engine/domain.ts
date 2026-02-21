@@ -128,7 +128,6 @@ export interface EngineError {
     | 'invalid_action'
     | 'invalid_loadout'
     | 'invalid_input'
-    | 'not_implemented'
     | 'terminal_state';
   message: string;
 }
@@ -140,18 +139,27 @@ export interface BuildPreview {
 }
 
 export interface ProofPayload {
-  sessionId: number;
-  planetSeed: string;
-  commitment: string;
-  moveCount: number;
-  moves: MoveCommand[];
-  resourcesPerMove: number[];
-  totalResources: number;
-  finalHull: number;
-  finalFuel: number;
-  finalCargo: number;
-  outcome: RunOutcome;
-  evacuationIntensity: 1 | 2 | 3 | null;
+  privateInputs: {
+    loadout: [number, number, number, number, number, number, number, number, number, number];
+    salt: string;
+  };
+  publicInputs: {
+    seed: string;
+    commitment: string;
+    numMoves: number;
+    moves: [number, number][];
+    evacuated: boolean;
+    biomes: number[];
+  };
+  publicOutputs: {
+    moveSequence: number[];
+    resourcesPerNode: number[];
+    totalResources: number;
+    finalHull: number;
+    finalFuel: number;
+    outcome: 0 | 1;
+    evacIntensity: number;
+  };
 }
 
 export interface EngineTransitionResult {

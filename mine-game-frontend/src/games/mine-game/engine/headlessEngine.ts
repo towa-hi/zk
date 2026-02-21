@@ -23,6 +23,7 @@ import {
 } from './domain';
 import { computeCommitment } from './commitment';
 import { generatePlanet } from './planet';
+import { buildProofPayload } from './proofPayload';
 
 export interface CreateEngineStateInput {
   sessionId: number;
@@ -296,23 +297,7 @@ function handleRequestProofPayload(state: EngineState): EngineTransitionResult {
     return fail(state, 'invalid_input', 'Cannot generate proof payload without commitment');
   }
 
-  const evacuationIntensity =
-    state.outcome === 'evacuated' ? (state.planet.nodes[state.currentNodeId - 1]?.intensity ?? null) : null;
-
-  const payload = {
-    sessionId: state.sessionId,
-    planetSeed: state.planetSeed,
-    commitment: state.commitment,
-    moveCount: state.moveCount,
-    moves: state.moves,
-    resourcesPerMove: state.moveResults.map((entry) => entry.resourcesGained),
-    totalResources: state.resources,
-    finalHull: state.hull,
-    finalFuel: state.fuel,
-    finalCargo: state.cargo,
-    outcome: state.outcome,
-    evacuationIntensity,
-  };
+  const payload = buildProofPayload(state);
 
   return {
     ok: true,
