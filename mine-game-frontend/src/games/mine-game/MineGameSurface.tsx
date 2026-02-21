@@ -1,34 +1,91 @@
-import { useState } from 'react';
-import type { MineGameSurfaceProps, UiNotice } from './GameSurface.types';
+import { useEffect, useState } from 'react';
+import type {
+  LoadoutCategory,
+  MineGameSurfaceProps,
+  PartTier,
+  ResistancePartTier,
+} from './GameSurface.types';
+import { ATTACHMENT_POINTS } from './ProbeBlueprint';
 
-function DefaultNotice({ notice }: { notice: UiNotice }) {
-  const toneClass =
-    notice.tone === 'error'
-      ? 'text-red-800 border-red-300 bg-red-100/65'
-      : notice.tone === 'success'
-        ? 'text-emerald-800 border-emerald-300 bg-emerald-100/65'
-        : 'text-blue-800 border-blue-300 bg-blue-100/65';
+type TierChoice = PartTier | ResistancePartTier;
 
-  return (
-    <div
-      className={`absolute top-3 left-3 right-3 z-10 rounded-md border px-3 py-2 text-xs font-medium backdrop-blur-sm ${toneClass}`}
-      role="status"
-      aria-live="polite"
-    >
-      {notice.message}
-    </div>
-  );
+interface TierOption {
+  tier: TierChoice;
+  label: string;
+  effect: string;
+  weight: number;
+}
+
+const FUEL_BY_TIER: Record<PartTier, number> = {
+  standard: 6,
+  enhanced: 8,
+  advanced: 10,
+};
+
+const CARGO_BY_TIER: Record<PartTier, number> = {
+  standard: 100,
+  enhanced: 175,
+  advanced: 225,
+};
+
+const EXTRACTOR_DISPLAY_MULTIPLIER_BY_TIER: Record<PartTier, string> = {
+  standard: '1.0',
+  enhanced: '1.2',
+  advanced: '1.5',
+};
+
+function getTierOptions(category: LoadoutCategory): TierOption[] {
+  if (
+    category === 'thermal_shielding' ||
+    category === 'cryo_insulation' ||
+    category === 'bio_filter' ||
+    category === 'rad_hardening'
+  ) {
+    return [
+      { tier: 'standard', label: 'Standard', effect: 'Resistance +0', weight: 0 },
+      { tier: 'enhanced', label: 'Enhanced', effect: 'Resistance +1', weight: 2 },
+    ];
+  }
+  if (category === 'fuel_tank') {
+    return [
+      { tier: 'standard', label: 'Standard', effect: 'Fuel 6', weight: 0 },
+      { tier: 'enhanced', label: 'Enhanced', effect: 'Fuel 8', weight: 2 },
+      { tier: 'advanced', label: 'Advanced', effect: 'Fuel 10', weight: 5 },
+    ];
+  }
+  if (category === 'cargo_hold') {
+    return [
+      { tier: 'standard', label: 'Standard', effect: 'Cargo 100', weight: 0 },
+      { tier: 'enhanced', label: 'Enhanced', effect: 'Cargo 175', weight: 2 },
+      { tier: 'advanced', label: 'Advanced', effect: 'Cargo 225', weight: 5 },
+    ];
+  }
+  return [
+    { tier: 'standard', label: 'Standard', effect: 'Multiplier x1.0', weight: 0 },
+    { tier: 'enhanced', label: 'Enhanced', effect: 'Multiplier x1.2', weight: 2 },
+    { tier: 'advanced', label: 'Advanced', effect: 'Multiplier x1.5', weight: 5 },
+  ];
+}
+
+function toTitleCase(value: string): string {
+  return value
+    .split('_')
+    .map((token) => token.charAt(0).toUpperCase() + token.slice(1))
+    .join(' ');
 }
 
 export function MineGameSurface(props: MineGameSurfaceProps) {
   const [isDebugVisible, setIsDebugVisible] = useState(false);
-  const activeNotice = props.notice
-    ? props.renderNotice
-      ? props.renderNotice(props.notice)
-      : <DefaultNotice notice={props.notice} />
-    : null;
+  const [selectedCategory, setSelectedCategory] = useState<LoadoutCategory>('fuel_tank');
 
   const { phase, loading } = props.state;
+  const buildState = props.state.build;
+
+  useEffect(() => {
+    if (phase !== 'build') {
+      setSelectedCategory('fuel_tank');
+    }
+  }, [phase]);
 
   const phaseTitle =
     phase === 'build'
@@ -41,7 +98,7 @@ export function MineGameSurface(props: MineGameSurfaceProps) {
 
   const phaseDescription =
     phase === 'build'
-      ? 'Select your loadout in this screen. This is a placeholder view for now.'
+      ? 'Select a category on the left, then choose a part on the right.'
       : phase === 'explore'
         ? 'Explore Planet Alpha here. This is a placeholder view for now.'
         : phase === 'prove'
@@ -78,14 +135,127 @@ export function MineGameSurface(props: MineGameSurfaceProps) {
         </div>
       ) : null}
       <div className="!rounded-none relative overflow-hidden min-h-[500px] min-w-[500px] max-h-full max-w-full aspect-square h-full w-full">
-        {activeNotice}
         <div className="h-full w-full flex flex-col">
           <div className="flex-1 bg-green-500/70 border-b border-green-700/40 flex items-center justify-center px-6">
-            <div className="text-center max-w-xl">
-              <p className="text-xs tracking-[0.2em] text-green-950 font-semibold">STELLAR EXPLORER</p>
-              <h2 className="mt-2 text-3xl font-black text-green-950">{phaseTitle} SCREEN</h2>
-              <p className="text-sm text-green-950/85 mt-3">{phaseDescription}</p>
-            </div>
+            {phase === 'build' && buildState ? (
+              <div className="w-full h-full py-3 min-h-0">
+                <div className="h-full min-h-0 grid grid-cols-3 gap-3">
+                  <div className="rounded-lg border border-green-900/30 bg-white/70 p-2 min-h-0 flex flex-col">
+                    <p className="text-xs tracking-[0.2em] text-green-950 font-semibold">CATEGORY</p>
+                    <div className="mt-2 space-y-1 overflow-auto min-h-0">
+                      {ATTACHMENT_POINTS.map((point) => {
+                        const active = selectedCategory === point.category;
+                        const tier = buildState.loadout[point.category];
+                        return (
+                          <button
+                            key={point.category}
+                            type="button"
+                            onClick={() => setSelectedCategory(point.category)}
+                            className={`w-full text-left rounded border px-2 py-1.5 text-xs ${
+                              active
+                                ? 'border-purple-700 bg-purple-50 text-purple-950'
+                                : 'border-green-900/20 bg-white/70 text-green-950 hover:bg-green-50'
+                            }`}
+                          >
+                            <div className="font-semibold">{point.label}</div>
+                            <div className="text-[11px] opacity-80">Selected: {tier}</div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  <div className="rounded-lg border border-green-900/30 bg-white/70 p-2 min-h-0 flex flex-col">
+                    <p className="text-xs tracking-[0.2em] text-green-950 font-semibold">PART</p>
+                    <p className="text-xs text-green-950/80 mt-1">
+                      {ATTACHMENT_POINTS.find((point) => point.category === selectedCategory)?.label}
+                    </p>
+                    <div className="mt-2 min-h-0 flex-1 overflow-auto space-y-1 pr-1">
+                      {getTierOptions(selectedCategory).map((option) => {
+                        const currentTier = buildState.loadout[selectedCategory];
+                        const active = currentTier === option.tier;
+                        return (
+                          <button
+                            key={option.tier}
+                            type="button"
+                            onClick={() => props.actions.setPartTier(selectedCategory, option.tier)}
+                            className={`w-full text-left rounded border px-2 py-1.5 ${
+                              active
+                                ? 'border-purple-700 bg-purple-50 text-purple-950'
+                                : 'border-green-900/20 bg-white/70 text-green-950 hover:bg-green-50'
+                            }`}
+                          >
+                            <div className="font-semibold text-xs">{option.label}</div>
+                            <div className="text-[11px] opacity-85">Effect: {option.effect}</div>
+                            <div className="text-[11px] opacity-85">Weight: {option.weight}</div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  <div className="rounded-lg border border-green-900/30 bg-green-50/75 p-2 min-h-0 flex flex-col text-green-950">
+                    <p className="text-xs tracking-[0.2em] font-semibold">PROBE STATS</p>
+                    <p className="mt-1 text-[10px] opacity-70">Viewing: {toTitleCase(selectedCategory)}</p>
+                    <div className="mt-2 min-h-0 overflow-auto">
+                      <div className="grid grid-cols-2 gap-x-2 gap-y-1 text-[11px]">
+                        <p>Weight</p>
+                        <p className="text-right font-semibold">
+                          {buildState.totalWeight} / {buildState.maxWeight}
+                        </p>
+                        <p>Fuel</p>
+                        <p className="text-right font-semibold">
+                          {FUEL_BY_TIER[buildState.loadout.fuel_tank]}
+                        </p>
+                        <p>Cargo</p>
+                        <p className="text-right font-semibold">
+                          {CARGO_BY_TIER[buildState.loadout.cargo_hold]}
+                        </p>
+                        <p>Resist Heat</p>
+                        <p className="text-right font-semibold">
+                          {buildState.loadout.thermal_shielding === 'enhanced' ? 1 : 0}
+                        </p>
+                        <p>Resist Cold</p>
+                        <p className="text-right font-semibold">
+                          {buildState.loadout.cryo_insulation === 'enhanced' ? 1 : 0}
+                        </p>
+                        <p>Resist Bio</p>
+                        <p className="text-right font-semibold">
+                          {buildState.loadout.bio_filter === 'enhanced' ? 1 : 0}
+                        </p>
+                        <p>Resist Rad</p>
+                        <p className="text-right font-semibold">
+                          {buildState.loadout.rad_hardening === 'enhanced' ? 1 : 0}
+                        </p>
+                      </div>
+                      <div className="mt-2 border-t border-green-900/15 pt-1 text-[11px]">
+                        <p className="font-semibold">Extractor Multipliers</p>
+                        <p>Heat: x{EXTRACTOR_DISPLAY_MULTIPLIER_BY_TIER[buildState.loadout.thermal_extractor]}</p>
+                        <p>Cold: x{EXTRACTOR_DISPLAY_MULTIPLIER_BY_TIER[buildState.loadout.cryo_extractor]}</p>
+                        <p>Bio: x{EXTRACTOR_DISPLAY_MULTIPLIER_BY_TIER[buildState.loadout.bio_extractor]}</p>
+                        <p>Rad: x{EXTRACTOR_DISPLAY_MULTIPLIER_BY_TIER[buildState.loadout.rad_extractor]}</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : phase === 'explore' && buildState ? (
+              <div className="w-full h-full py-3 min-h-0">
+                <div className="h-full min-h-0 rounded-lg border border-green-900/30 bg-white/70 p-4 text-green-950">
+                  <p className="text-xs tracking-[0.2em] font-semibold">STELLAR EXPLORER</p>
+                  <h2 className="mt-2 text-2xl font-black">EXPLORE SCREEN</h2>
+                  <p className="mt-2 text-sm text-green-950/85">
+                    Probe visualization removed from this screen.
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <div className="text-center max-w-xl">
+                <p className="text-xs tracking-[0.2em] text-green-950 font-semibold">STELLAR EXPLORER</p>
+                <h2 className="mt-2 text-3xl font-black text-green-950">{phaseTitle} SCREEN</h2>
+                <p className="text-sm text-green-950/85 mt-3">{phaseDescription}</p>
+              </div>
+            )}
           </div>
 
           <div

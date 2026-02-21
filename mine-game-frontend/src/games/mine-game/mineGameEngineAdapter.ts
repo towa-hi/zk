@@ -44,10 +44,17 @@ export function createMineGameEngineAdapter(
     getEngineState: () => state,
     getViewState: () => {
       const snapshot = createEngineSnapshot(state);
+      const weightRemaining = Math.max(0, snapshot.buildPreview.maxWeight - snapshot.buildPreview.totalWeight);
       return {
         sessionId: snapshot.sessionId,
         phase: snapshot.phase,
         loading: false,
+        build: {
+          loadout: state.loadout,
+          totalWeight: snapshot.buildPreview.totalWeight,
+          maxWeight: snapshot.buildPreview.maxWeight,
+          weightRemaining,
+        },
       };
     },
     getProofPayload: () => proofPayload,

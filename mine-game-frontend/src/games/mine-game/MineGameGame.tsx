@@ -1,5 +1,12 @@
 import { useEffect, useState } from 'react';
-import type { MineGameActions, MineGameViewState, UiNotice } from './GameSurface.types';
+import type {
+  LoadoutCategory,
+  MineGameActions,
+  MineGameViewState,
+  PartTier,
+  ResistancePartTier,
+  UiNotice,
+} from './GameSurface.types';
 import { MineGameSurface } from './MineGameSurface';
 import { createMineGameEngineAdapter } from './mineGameEngineAdapter';
 import { createMineGameContractAdapter } from './mineGameContractAdapter';
@@ -147,6 +154,23 @@ export function MineGameGame({
     setDebugLines([createdLine, resetLine]);
   };
 
+  const setPartTier = (category: LoadoutCategory, tier: PartTier | ResistancePartTier) => {
+    if (loading) return;
+    const resultBundle = engineAdapter.applyAction({
+      type: 'set_part_tier',
+      category,
+      tier,
+    });
+    setNotice(resultBundle.notice);
+    setViewState(engineAdapter.getViewState());
+    setEngineStateJson(JSON.stringify(engineAdapter.getEngineState(), null, 2));
+    appendDebugLine(
+      resultBundle.result.ok
+        ? `Part updated: ${category}=${tier}`
+        : `Part update rejected (${resultBundle.result.error?.code ?? 'unknown'})`
+    );
+  };
+
   const surfacedState: MineGameViewState = {
     ...viewState,
     loading,
@@ -155,6 +179,7 @@ export function MineGameGame({
   const actions: MineGameActions = {
     goToNextPhase,
     resetScreens,
+    setPartTier,
   };
 
   return (
