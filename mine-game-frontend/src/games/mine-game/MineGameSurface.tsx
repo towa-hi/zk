@@ -30,6 +30,14 @@ export function MineGameSurface(props: MineGameSurfaceProps) {
     <div className="bg-white/70 backdrop-blur-xl rounded-none p-2 shadow-xl border-2 border-purple-200">
       <div className="card !rounded-none min-h-[420px] relative flex items-center justify-center">
         {activeNotice}
+        {props.debugText ? (
+          <div
+            className="absolute top-2 right-2 z-20 rounded px-2 py-1 text-[10px] font-mono text-white bg-black/60 backdrop-blur-sm select-none"
+            aria-live="off"
+          >
+            {props.debugText}
+          </div>
+        ) : null}
         <div className="text-center">
           <p className="text-base font-semibold text-gray-700">Clean canvas ready.</p>
           <p className="text-sm text-gray-500 mt-2">

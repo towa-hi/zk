@@ -43,3 +43,6 @@ Thumbs.db
 # Local AI guidance docs
 AGENTS.md
 CLAUDE.md
+
+# Local external references
+ultrahonk_soroban_contract/

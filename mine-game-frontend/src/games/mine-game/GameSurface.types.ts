@@ -35,5 +35,6 @@ export interface MineGameSurfaceProps {
   state: MineGameViewState;
   actions: MineGameActions;
   notice?: UiNotice | null;
+  debugText?: string;
   renderNotice?: (notice: UiNotice) => ReactNode;
 }

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { MineGameService } from './mineGameService';
 import { useWallet } from '@/hooks/useWallet';
-import { MINE_GAME_CONTRACT } from '@/utils/constants';
+import { MINE_GAME_CONTRACT, RPC_URL } from '@/utils/constants';
 import type { Game } from './bindings';
 import type { MineGameActions, MineGameViewState, UiNotice } from './GameSurface.types';
 import { MineGameSurface } from './MineGameSurface';
@@ -20,6 +20,14 @@ const createRandomSessionId = (): number => {
 };
 
 const mineGameService = new MineGameService(MINE_GAME_CONTRACT);
+const LEDGER_INTERVAL_MS = 5000;
+const LEDGER_SYNC_INTERVAL_MS = 15000;
+
+const deriveHorizonUrl = (rpcUrl: string): string => {
+  if (rpcUrl.includes('futurenet')) return 'https://horizon-futurenet.stellar.org';
+  if (rpcUrl.includes('testnet')) return 'https://horizon-testnet.stellar.org';
+  return 'https://horizon.stellar.org';
+};
 
 interface MineGameGameProps {
   userAddress: string;
@@ -47,7 +55,10 @@ export function MineGameGame({
   const [phase, setPhase] = useState<'create' | 'guess' | 'complete'>('create');
   const [loading, setLoading] = useState(false);
   const [notice, setNotice] = useState<UiNotice | null>(null);
+  const [nextLedgerCountdownMs, setNextLedgerCountdownMs] = useState<number | null>(null);
+  const [countdownStatus, setCountdownStatus] = useState<'syncing' | 'live' | 'error'>('syncing');
   const actionLock = useRef(false);
+  const nextLedgerCloseAtMsRef = useRef<number | null>(null);
 
   const runAction = async (action: () => Promise<void>) => {
     if (actionLock.current || loading) return;
@@ -97,6 +108,66 @@ export function MineGameGame({
     }, 5000);
     return () => clearInterval(interval);
   }, [phase, sessionId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const horizonUrl = deriveHorizonUrl(RPC_URL);
+
+    const syncNextLedger = async () => {
+      try {
+        const response = await fetch(`${horizonUrl}/ledgers?order=desc&limit=1`);
+        if (!response.ok) {
+          throw new Error(`Failed to fetch latest ledger: ${response.status}`);
+        }
+        const payload = await response.json();
+        const latestLedger = payload?._embedded?.records?.[0];
+        const closedAt = latestLedger?.closed_at;
+        const closedAtMs = typeof closedAt === 'string' ? Date.parse(closedAt) : Number.NaN;
+        if (!Number.isFinite(closedAtMs)) {
+          throw new Error('Latest ledger close time is missing');
+        }
+
+        nextLedgerCloseAtMsRef.current = closedAtMs + LEDGER_INTERVAL_MS;
+        if (!cancelled) {
+          setCountdownStatus('live');
+          setNextLedgerCountdownMs(Math.max(0, nextLedgerCloseAtMsRef.current - Date.now()));
+        }
+      } catch (_error) {
+        if (!cancelled) {
+          setCountdownStatus('error');
+          setNextLedgerCountdownMs(null);
+        }
+      }
+    };
+
+    void syncNextLedger();
+
+    const tickInterval = setInterval(() => {
+      const targetMs = nextLedgerCloseAtMsRef.current;
+      if (targetMs === null) return;
+
+      const now = Date.now();
+      if (now >= targetMs) {
+        const intervalsAhead = Math.floor((now - targetMs) / LEDGER_INTERVAL_MS) + 1;
+        nextLedgerCloseAtMsRef.current = targetMs + intervalsAhead * LEDGER_INTERVAL_MS;
+      }
+
+      const nextTargetMs = nextLedgerCloseAtMsRef.current;
+      if (nextTargetMs !== null) {
+        setNextLedgerCountdownMs(Math.max(0, nextTargetMs - Date.now()));
+      }
+    }, 250);
+
+    const syncInterval = setInterval(() => {
+      void syncNextLedger();
+    }, LEDGER_SYNC_INTERVAL_MS);
+
+    return () => {
+      cancelled = true;
+      clearInterval(tickInterval);
+      clearInterval(syncInterval);
+    };
+  }, []);
 
   const handleCreateGame = async () => {
     await runAction(async () => {
@@ -183,5 +254,20 @@ export function MineGameGame({
     startNewGame: resetForNewGame,
   };
 
-  return <MineGameSurface userAddress={userAddress} state={viewState} actions={actions} notice={notice} />;
+  const debugText =
+    countdownStatus === 'error'
+      ? 'Next block: unavailable'
+      : countdownStatus === 'syncing' || nextLedgerCountdownMs === null
+        ? 'Next block: --'
+        : `Next block: ${(nextLedgerCountdownMs / 1000).toFixed(1)}s`;
+
+  return (
+    <MineGameSurface
+      userAddress={userAddress}
+      state={viewState}
+      actions={actions}
+      notice={notice}
+      debugText={debugText}
+    />
+  );
 }

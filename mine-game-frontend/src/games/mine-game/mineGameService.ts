@@ -142,6 +142,7 @@ export class MineGameService {
     player1Signer: Pick<contract.ClientOptions, 'signTransaction' | 'signAuthEntry'>,
     authTtlMinutes?: number
   ): Promise<string> {
+    /*
     // Step 1: Build transaction with Player 2 as the source (no signing capabilities needed yet)
     const buildClient = new MineGameClient({
       contractId: this.contractId,
@@ -248,6 +249,17 @@ export class MineGameService {
     const signedAuthEntryXdr = signedAuthEntry.toXDR('base64');
     console.log('[prepareStartGame] ✅ Successfully signed and exported Player 1 auth entry XDR (length:', signedAuthEntryXdr.length, ')');
     return signedAuthEntryXdr;
+    */
+    const _ = {
+      sessionId,
+      player1,
+      player2,
+      player1Points,
+      player2Points,
+      player1Signer,
+      authTtlMinutes,
+    };
+    throw new Error('Gameplay transactions are temporarily disabled');
   }
 
   /**
@@ -355,6 +367,7 @@ export class MineGameService {
     player2Signer: Pick<contract.ClientOptions, 'signTransaction' | 'signAuthEntry'>,
     authTtlMinutes?: number
   ): Promise<string> {
+    /*
     console.log('[importAndSignAuthEntry] Parsing Player 1 signed auth entry...');
 
     // Parse the auth entry to extract game parameters
@@ -456,6 +469,15 @@ export class MineGameService {
     // Export full transaction XDR (with both auth entries signed)
     console.log('[importAndSignAuthEntry] Returning full transaction XDR ready for submission');
     return player2Tx.toXDR();
+    */
+    const _ = {
+      player1SignedAuthEntryXdr,
+      player2Address,
+      player2Points,
+      player2Signer,
+      authTtlMinutes,
+    };
+    throw new Error('Gameplay transactions are temporarily disabled');
   }
 
   /**
@@ -472,6 +494,7 @@ export class MineGameService {
     signer: Pick<contract.ClientOptions, 'signTransaction' | 'signAuthEntry'>,
     authTtlMinutes?: number
   ) {
+    /*
     const client = this.createSigningClient(signerAddress, signer);
 
     // Import the transaction with all auth entries signed
@@ -492,6 +515,9 @@ export class MineGameService {
       validUntilLedgerSeq
     );
     return sentTx.result;
+    */
+    const _ = { xdr, signerAddress, signer, authTtlMinutes };
+    throw new Error('Gameplay transactions are temporarily disabled');
   }
 
   /**
@@ -607,6 +633,7 @@ export class MineGameService {
     signer: Pick<contract.ClientOptions, 'signTransaction' | 'signAuthEntry'>,
     authTtlMinutes?: number
   ) {
+    /*
     if (guess < 1 || guess > 10) {
       throw new Error('Guess must be between 1 and 10');
     }
@@ -638,6 +665,9 @@ export class MineGameService {
       }
       throw err;
     }
+    */
+    const _ = { sessionId, playerAddress, guess, signer, authTtlMinutes };
+    throw new Error('Gameplay transactions are temporarily disabled');
   }
 
   /**
@@ -649,6 +679,7 @@ export class MineGameService {
     signer: Pick<contract.ClientOptions, 'signTransaction' | 'signAuthEntry'>,
     authTtlMinutes?: number
   ) {
+    /*
     const client = this.createSigningClient(callerAddress, signer);
     const tx = await client.reveal_winner({ session_id: sessionId }, DEFAULT_METHOD_OPTIONS);
     // NOTE: Contract methods automatically simulate - footprint already includes all required storage keys
@@ -682,6 +713,9 @@ export class MineGameService {
 
       throw err;
     }
+    */
+    const _ = { sessionId, callerAddress, signer, authTtlMinutes };
+    throw new Error('Gameplay transactions are temporarily disabled');
   }
 
   /**
