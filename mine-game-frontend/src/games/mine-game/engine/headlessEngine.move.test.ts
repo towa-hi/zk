@@ -135,6 +135,28 @@ describe('headless move resolution', () => {
     expect(evacuated.state.resources).toBe(Math.floor((beforeEvacResources * keepPercent) / 100));
   });
 
+  it('evacuate at max depth keeps all resources (safe return)', () => {
+    const state = createExploreState('safe-return-seed');
+    const leafNode = state.planet.nodes.find((node) => node.depth === 6);
+    expect(leafNode).toBeDefined();
+
+    const onLeaf: EngineState = {
+      ...state,
+      currentNodeId: leafNode!.id,
+      visitedNodeIds: [...new Set([...state.visitedNodeIds, leafNode!.id])],
+      resources: 123,
+      cargo: 123,
+      fuel: Math.max(1, state.fuel),
+    };
+
+    const evacuated = applyEngineAction(onLeaf, { type: 'evacuate' });
+    expect(evacuated.ok).toBe(true);
+    expect(evacuated.state.outcome).toBe('evacuated');
+    expect(evacuated.state.phase).toBe('prove');
+    expect(evacuated.state.resources).toBe(123);
+    expect(evacuated.state.cargo).toBe(123);
+  });
+
   it('returns proof payload in prove phase and transitions to done', () => {
     const state = createExploreState('proof-seed');
     const afterMove = applyEngineAction(state, {

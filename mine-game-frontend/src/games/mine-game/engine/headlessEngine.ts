@@ -8,6 +8,7 @@ import {
   FUEL_BY_TIER,
   HAZARD_TYPES,
   JETTISON_KEEP_PERCENT,
+  MAX_DEPTH,
   MAX_MOVES,
   RESOURCE_BASE_BY_INTENSITY,
   type EngineAction,
@@ -275,7 +276,8 @@ function handleEvacuate(state: EngineState): EngineTransitionResult {
     return fail(state, 'invalid_input', `Current node ${state.currentNodeId} does not exist`);
   }
 
-  const keepPercent = EVACUATION_PERCENT_BY_INTENSITY[currentNode.intensity];
+  const keepPercent =
+    currentNode.depth >= MAX_DEPTH ? 100 : EVACUATION_PERCENT_BY_INTENSITY[currentNode.intensity];
   const keptResources = Math.floor((state.resources * keepPercent) / 100);
   const fuelAfter = Math.max(0, state.fuel - 1);
 

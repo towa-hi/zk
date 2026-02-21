@@ -413,13 +413,17 @@ export function MineGameSurface(props: MineGameSurfaceProps) {
 
                     {(() => {
                       const noFuel = explore.fuel <= 0;
+                      const currentNode = props.state.planetNodes?.find(
+                        (node) => node.id === explore.currentNodeId,
+                      );
+                      const isSafeReturn = currentNode?.depth === 6;
                       const isAdj = selectedNodeId != null
                         && selectedNodeId !== explore.currentNodeId
                         && (selectedNodeId === explore.currentNodeId * 2
                           || selectedNodeId === explore.currentNodeId * 2 + 1
                           || (selectedNodeId === Math.floor(explore.currentNodeId / 2) && explore.currentNodeId > 1));
                       const moveDisabled = movePreview.isCurrent || noFuel || !isAdj || loading;
-                      const evacDisabled = movePreview.isCurrent || noFuel || loading;
+                      const evacDisabled = noFuel || loading;
 
                       return (
                         <div className="rounded border border-green-900/30 bg-white/70 px-2 py-1.5 text-green-950 flex flex-col">
@@ -431,7 +435,7 @@ export function MineGameSurface(props: MineGameSurfaceProps) {
                               disabled={evacDisabled}
                               onClick={() => props.actions.evacuate()}
                             >
-                              Ditch Probe
+                              {isSafeReturn ? 'Return Safely' : 'Ditch Probe'}
                             </button>
                             <button
                               type="button"
