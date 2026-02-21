@@ -7,27 +7,17 @@ export interface UiNotice {
   message: string;
 }
 
-export type GamePhase = 'create' | 'guess' | 'complete';
+export type GamePhase = 'build' | 'explore' | 'prove' | 'done';
 
 export interface MineGameViewState {
   sessionId: number;
   phase: GamePhase;
   loading: boolean;
-  selectedGuess: number | null;
-  playerGuess: number | null;
-  houseGuess: number | null;
-  winningNumber: number | null;
-  playerWon: boolean;
-  hasGuessed: boolean;
-  canReveal: boolean;
 }
 
 export interface MineGameActions {
-  startGame: () => Promise<void>;
-  selectGuess: (guess: number) => void;
-  submitGuess: () => Promise<void>;
-  revealWinner: () => Promise<void>;
-  startNewGame: () => void;
+  goToNextPhase: () => void;
+  resetScreens: () => void;
 }
 
 export interface MineGameSurfaceProps {

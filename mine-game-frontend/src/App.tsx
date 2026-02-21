@@ -43,9 +43,6 @@ export default function App() {
       ) : (
         <MineGameGame
           userAddress={userAddress}
-          currentEpoch={1}
-          availablePoints={1000000000n}
-          onStandingsRefresh={() => {}}
           onGameComplete={() => {}}
         />
       )}
