@@ -61,7 +61,56 @@ function printState(state: EngineState) {
     null,
     2
   ));
+  printPlanetNavStrip(state);
   console.log(`available: ${getAvailableCommandsForState(state).join(' | ')}`);
+}
+
+function printPlanetNavStrip(state: EngineState) {
+  const currentId = state.currentNodeId;
+  const backId = currentId > 1 ? Math.floor(currentId / 2) : null;
+  const leftId = currentId * 2 <= state.planet.nodes.length ? currentId * 2 : null;
+  const rightId = currentId * 2 + 1 <= state.planet.nodes.length ? currentId * 2 + 1 : null;
+
+  const currentDepth = getNodeDepth(currentId);
+  const leafSpan = 2 ** Math.max(0, 6 - currentDepth);
+  const leafStart = ((currentId - 2 ** currentDepth) * leafSpan) + 1;
+  const leafEnd = leafStart + leafSpan - 1;
+
+  console.log('\n=== PLANET NAV ===');
+  console.log(
+    `position: node=${currentId} depth=${currentDepth} covers_leaves=${leafStart}-${leafEnd} seed=${state.planet.seed}`
+  );
+  console.log(`back:    ${formatNodeSummary(state, backId)}`);
+  console.log(`current: ${formatNodeSummary(state, currentId)}`);
+  console.log(`left:    ${formatNodeSummary(state, leftId)}`);
+  console.log(`right:   ${formatNodeSummary(state, rightId)}`);
+}
+
+function getNodeDepth(nodeId: number): number {
+  return Math.floor(Math.log2(nodeId));
+}
+
+function formatNodeSummary(state: EngineState, nodeId: number | null): string {
+  if (nodeId === null) return '--';
+  const node = state.planet.nodes[nodeId - 1];
+  if (!node) return '--';
+  const visited = state.visitedNodeIds.includes(nodeId) ? 'V' : ' ';
+  return `#${node.id} d${node.depth} i${node.intensity} ${shortBiome(node.biomeType)} [${node.hazards[0]}/${node.hazards[1]}] ${visited}`;
+}
+
+function shortBiome(biome: string): string {
+  return biome
+    .replaceAll('_', '-')
+    .replace('magma-fields', 'magma')
+    .replace('deep-freeze', 'freeze')
+    .replace('hive-sprawl', 'hive')
+    .replace('alien-ruins', 'ruins')
+    .replace('thermal-vents', 'vents')
+    .replace('ember-jungle', 'ember')
+    .replace('slag-wastes', 'slag')
+    .replace('cryo-marsh', 'marsh')
+    .replace('fallout-tundra', 'tundra')
+    .replace('mutant-thicket', 'thicket');
 }
 
 function getAvailableCommandsForState(state: EngineState): string[] {

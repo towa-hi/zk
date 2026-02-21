@@ -1,11 +1,14 @@
 import {
+  BASE_DAMAGE,
   BASE_FUEL,
   BASE_HULL,
   CARGO_BY_TIER,
   EXTRACTOR_MULTIPLIER_BY_TIER,
   FUEL_BY_TIER,
   HAZARD_TYPES,
+  JETTISON_KEEP_PERCENT,
   MAX_MOVES,
+  RESOURCE_BASE_BY_INTENSITY,
   type EngineAction,
   type EngineError,
   type EngineSnapshot,
@@ -17,6 +20,7 @@ import {
   createDefaultLoadout,
   getBuildPreview,
 } from './domain';
+import { generatePlanet } from './planet';
 
 export interface CreateEngineStateInput {
   sessionId: number;
@@ -25,12 +29,14 @@ export interface CreateEngineStateInput {
 }
 
 export function createInitialEngineState(input: CreateEngineStateInput): EngineState {
+  const planet = generatePlanet(input.planetSeed);
   return {
     sessionId: input.sessionId,
     playerAddress: input.playerAddress,
     phase: 'build',
     outcome: 'in_progress',
-    planetSeed: input.planetSeed,
+    planetSeed: planet.seed,
+    planet,
     commitment: null,
     salt: null,
     loadout: createDefaultLoadout(),
@@ -76,7 +82,7 @@ export function applyEngineAction(state: EngineState, action: EngineAction): Eng
     case 'confirm_build':
       return handleConfirmBuild(state, action.salt);
     case 'move':
-      return fail(state, 'not_implemented', 'Move resolution is scheduled for Milestone 3');
+      return handleMove(state, action.direction, action.extract);
     case 'evacuate':
       return fail(state, 'not_implemented', 'Evacuation resolution is scheduled for Milestone 3');
     case 'request_proof_payload':
@@ -163,6 +169,91 @@ function handleConfirmBuild(state: EngineState, salt: string): EngineTransitionR
   });
 }
 
+function handleMove(state: EngineState, direction: 'left' | 'right' | 'up', extract: boolean): EngineTransitionResult {
+  if (state.phase !== 'explore') {
+    return fail(state, 'invalid_phase', 'Move can only be applied during explore phase');
+  }
+
+  if (state.moveCount >= MAX_MOVES) {
+    return fail(state, 'terminal_state', `Move limit reached (${MAX_MOVES})`);
+  }
+
+  if (state.fuel <= 0 || state.hull <= 0 || state.outcome !== 'in_progress') {
+    return fail(state, 'terminal_state', 'Run is no longer active');
+  }
+
+  const toNodeId = resolveMoveTarget(state.currentNodeId, direction, state.planet.nodes.length);
+  if (!toNodeId) {
+    return fail(state, 'invalid_input', `Cannot move ${direction} from node ${state.currentNodeId}`);
+  }
+
+  const targetNode = state.planet.nodes[toNodeId - 1];
+  if (!targetNode) {
+    return fail(state, 'invalid_input', `Target node ${toNodeId} does not exist`);
+  }
+
+  const stats = state.stats;
+  if (!stats) {
+    return fail(state, 'invalid_phase', 'Probe stats are unavailable before build confirmation');
+  }
+
+  const isFirstVisit = !state.visitedNodeIds.includes(toNodeId);
+  const fuelAfter = Math.max(0, state.fuel - 1);
+
+  // Revisited nodes are intentionally safe/no-reward to align with "backtracking is safe."
+  const damageTaken = isFirstVisit ? computeNodeDamage(targetNode.hazards, targetNode.intensity, stats.resistances) : 0;
+  const hullAfter = Math.max(0, state.hull - damageTaken);
+  const resourcesCandidate =
+    isFirstVisit && extract ? computeNodeResources(targetNode.hazards, targetNode.intensity, stats.extractors) : 0;
+  const cargoRoom = Math.max(0, stats.maxCargo - state.cargo);
+  const resourcesGained = Math.min(resourcesCandidate, cargoRoom);
+  const cargoAfter = state.cargo + resourcesGained;
+  const resourcesAfter = state.resources + resourcesGained;
+
+  const move = {
+    direction,
+    extract,
+  } as const;
+
+  const moveResult = {
+    moveIndex: state.moveCount + 1,
+    fromNodeId: state.currentNodeId,
+    toNodeId,
+    extracted: extract,
+    damageTaken,
+    resourcesGained,
+    hullAfter,
+    fuelAfter,
+    cargoAfter,
+  };
+
+  let nextState: EngineState = {
+    ...state,
+    currentNodeId: toNodeId,
+    visitedNodeIds: isFirstVisit ? [...state.visitedNodeIds, toNodeId] : state.visitedNodeIds,
+    hull: hullAfter,
+    fuel: fuelAfter,
+    cargo: cargoAfter,
+    resources: resourcesAfter,
+    moveCount: state.moveCount + 1,
+    moves: [...state.moves, move],
+    moveResults: [...state.moveResults, moveResult],
+  };
+
+  if (hullAfter <= 0 || fuelAfter <= 0) {
+    const keptResources = Math.floor((nextState.resources * JETTISON_KEEP_PERCENT) / 100);
+    nextState = {
+      ...nextState,
+      outcome: 'jettisoned',
+      phase: 'done',
+      resources: keptResources,
+      cargo: keptResources,
+    };
+  }
+
+  return ok(nextState);
+}
+
 function deriveProbeStats(loadout: Loadout): ProbeStats {
   const resistances: Record<HazardType, number> = {
     heat: loadout.thermal_shielding === 'enhanced' ? 1 : 0,
@@ -184,6 +275,41 @@ function deriveProbeStats(loadout: Loadout): ProbeStats {
     resistances,
     extractors,
   };
+}
+
+function resolveMoveTarget(currentNodeId: number, direction: 'left' | 'right' | 'up', nodeCount: number): number | null {
+  if (direction === 'up') {
+    return currentNodeId > 1 ? Math.floor(currentNodeId / 2) : null;
+  }
+  if (direction === 'left') {
+    const left = currentNodeId * 2;
+    return left <= nodeCount ? left : null;
+  }
+  const right = currentNodeId * 2 + 1;
+  return right <= nodeCount ? right : null;
+}
+
+function computeNodeDamage(
+  hazards: readonly [HazardType, HazardType],
+  intensity: 1 | 2 | 3,
+  resistances: Record<HazardType, number>
+): number {
+  const intensityDelta = intensity - 1;
+  const first = Math.max(0, BASE_DAMAGE + intensityDelta - resistances[hazards[0]]);
+  const second = Math.max(0, BASE_DAMAGE + intensityDelta - resistances[hazards[1]]);
+  return first + second;
+}
+
+function computeNodeResources(
+  hazards: readonly [HazardType, HazardType],
+  intensity: 1 | 2 | 3,
+  extractors: Record<HazardType, number>
+): number {
+  const base = RESOURCE_BASE_BY_INTENSITY[intensity];
+  const first = base * extractors[hazards[0]];
+  const second = base * extractors[hazards[1]];
+  const total = first + second;
+  return hazards[0] === hazards[1] ? total * 2 : total;
 }
 
 function computeStubCommitment(loadout: Loadout, salt: string): string {

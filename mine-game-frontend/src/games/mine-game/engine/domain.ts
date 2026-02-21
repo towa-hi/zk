@@ -5,6 +5,7 @@ export const NODE_COUNT = 127;
 export const BASE_HULL = 10;
 export const BASE_FUEL = 6;
 export const BASE_DAMAGE = 1;
+export const DEFAULT_PLANET_HASH = 'planet-alpha-default-seed';
 
 export type HazardType = 'heat' | 'cold' | 'bio' | 'rad';
 
@@ -98,6 +99,7 @@ export interface EngineState {
   phase: GamePhase;
   outcome: RunOutcome;
   planetSeed: string;
+  planet: Planet;
   commitment: string | null;
   salt: string | null;
   loadout: Loadout;
@@ -183,6 +185,19 @@ export const BIOME_HAZARDS: Record<BiomeType, readonly [HazardType, HazardType]>
   fallout_tundra: ['cold', 'rad'],
   mutant_thicket: ['bio', 'rad'],
 };
+
+export const BIOME_TYPES: readonly BiomeType[] = [
+  'magma_fields',
+  'deep_freeze',
+  'hive_sprawl',
+  'alien_ruins',
+  'thermal_vents',
+  'ember_jungle',
+  'slag_wastes',
+  'cryo_marsh',
+  'fallout_tundra',
+  'mutant_thicket',
+] as const;
 
 export const PART_WEIGHT_BY_TIER: Record<PartTier, number> = {
   standard: 0,
