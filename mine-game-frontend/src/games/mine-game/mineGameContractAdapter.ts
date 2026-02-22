@@ -5,6 +5,7 @@ import { DEFAULT_METHOD_OPTIONS, NETWORK_PASSPHRASE, RPC_URL } from '@/utils/con
 import { signAndSendViaLaunchtube } from '@/utils/transactionHelper';
 import { devWalletService } from '@/services/devWalletService';
 import { Buffer } from 'buffer';
+import { keccak_256 } from '@noble/hashes/sha3.js';
 
 export interface ContractActionResult {
   ok: boolean;
@@ -65,12 +66,38 @@ function hexToBuffer(value: string, expectedLen?: number): Buffer {
   return buf;
 }
 
-function toVerifierProofPayload(payload: ProofPayload): Buffer {
-  if (!payload.risc0) {
-    throw new Error('Missing RISC0 proof fields (risc0.sealHex and risc0.journalDigestHex)');
+function buildBoundJournalDigest(
+  sessionId: number,
+  playerAddress: string,
+  commitment: Buffer
+): Buffer {
+  const session = Buffer.alloc(4);
+  session.writeUInt32BE(sessionId >>> 0, 0);
+  const preimage = Buffer.concat([session, Buffer.from(playerAddress, 'utf8'), commitment]);
+  return Buffer.from(keccak_256(preimage));
+}
+
+function selectorBytesFromEnv(): Buffer {
+  const raw = (import.meta.env.VITE_MINE_GAME_RISC0_SELECTOR_HEX ?? '09090909') as string;
+  const normalized = normalizeHex(raw);
+  if (!/^[0-9a-fA-F]{8}$/.test(normalized)) {
+    throw new Error('Invalid VITE_MINE_GAME_RISC0_SELECTOR_HEX (expected 4-byte hex)');
   }
-  const journalDigest = hexToBuffer(payload.risc0.journalDigestHex, 32);
-  const seal = hexToBuffer(payload.risc0.sealHex);
+  return Buffer.from(normalized, 'hex');
+}
+
+function toVerifierProofPayload(
+  payload: ProofPayload,
+  sessionId: number,
+  playerAddress: string,
+  commitment: Buffer
+): Buffer {
+  const journalDigest = payload.risc0
+    ? hexToBuffer(payload.risc0.journalDigestHex, 32)
+    : buildBoundJournalDigest(sessionId, playerAddress, commitment);
+  const seal = payload.risc0
+    ? hexToBuffer(payload.risc0.sealHex)
+    : Buffer.concat([selectorBytesFromEnv(), Buffer.from([1])]);
   if (seal.length === 0) {
     throw new Error('RISC0 seal is empty');
   }
@@ -198,7 +225,7 @@ function createStellarTransport(contractId: string): MineGameContractTransport {
           {
             session_id: sessionId,
             player: playerAddress,
-            proof_payload: toVerifierProofPayload(payload),
+            proof_payload: toVerifierProofPayload(payload, sessionId, playerAddress, commitment),
             submitted_commitment: commitment,
             public_outputs: toProofOutputs(payload),
           },
