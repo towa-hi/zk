@@ -160,6 +160,10 @@ export interface ProofPayload {
     outcome: 0 | 1;
     evacIntensity: number;
   };
+  risc0?: {
+    sealHex: string;
+    journalDigestHex: string;
+  };
 }
 
 export interface EngineTransitionResult {

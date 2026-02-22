@@ -22,7 +22,14 @@ function getSeed(seed: string): string {
   return `keccak_${toHex(keccak_256(TEXT_ENCODER.encode(seed)))}`;
 }
 
-export function buildProofPayload(state: EngineState): ProofPayload {
+export interface BuildProofPayloadOptions {
+  risc0?: {
+    sealHex: string;
+    journalDigestHex: string;
+  };
+}
+
+export function buildProofPayload(state: EngineState, options: BuildProofPayloadOptions = {}): ProofPayload {
   if (!state.salt || !state.commitment) {
     throw new Error('Cannot build proof payload without salt and commitment');
   }
@@ -70,5 +77,6 @@ export function buildProofPayload(state: EngineState): ProofPayload {
       outcome: state.outcome === 'jettisoned' ? 1 : 0,
       evacIntensity,
     },
+    risc0: options.risc0,
   };
 }

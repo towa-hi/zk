@@ -49,6 +49,34 @@ function toProofOutputs(payload: ProofPayload): ProofOutputs {
   };
 }
 
+function normalizeHex(value: string): string {
+  return value.startsWith('0x') ? value.slice(2) : value;
+}
+
+function hexToBuffer(value: string, expectedLen?: number): Buffer {
+  const hex = normalizeHex(value);
+  if (!/^[0-9a-fA-F]+$/.test(hex) || hex.length % 2 !== 0) {
+    throw new Error('Invalid hex payload');
+  }
+  const buf = Buffer.from(hex, 'hex');
+  if (expectedLen !== undefined && buf.length !== expectedLen) {
+    throw new Error(`Invalid payload length: expected ${expectedLen} bytes`);
+  }
+  return buf;
+}
+
+function toVerifierProofPayload(payload: ProofPayload): Buffer {
+  if (!payload.risc0) {
+    throw new Error('Missing RISC0 proof fields (risc0.sealHex and risc0.journalDigestHex)');
+  }
+  const journalDigest = hexToBuffer(payload.risc0.journalDigestHex, 32);
+  const seal = hexToBuffer(payload.risc0.sealHex);
+  if (seal.length === 0) {
+    throw new Error('RISC0 seal is empty');
+  }
+  return Buffer.concat([journalDigest, seal]);
+}
+
 function extractResultError(result: unknown): string | null {
   const maybeResult = result as
     | { isErr?: () => boolean; unwrapErr?: () => unknown }
@@ -170,7 +198,7 @@ function createStellarTransport(contractId: string): MineGameContractTransport {
           {
             session_id: sessionId,
             player: playerAddress,
-            proof_payload: Buffer.from(JSON.stringify(payload), 'utf8'),
+            proof_payload: toVerifierProofPayload(payload),
             submitted_commitment: commitment,
             public_outputs: toProofOutputs(payload),
           },

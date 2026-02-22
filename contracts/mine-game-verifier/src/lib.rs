@@ -76,10 +76,10 @@ impl MineGameVerifierContract {
     /// flow unblocked while wiring the full prover + verifier pipeline.
     pub fn verify(
         env: Env,
-        _session_id: u32,
-        _player: Address,
+        session_id: u32,
+        player: Address,
         proof_payload: Bytes,
-        _commitment: Bytes,
+        commitment: Bytes,
         _outputs: ProofOutputs,
     ) -> bool {
         let router: Option<Address> = env.storage().instance().get(&DataKey::Router);
@@ -87,13 +87,17 @@ impl MineGameVerifierContract {
 
         let (router, image_id) = match (router, image_id) {
             (Some(router), Some(image_id)) => (router, image_id),
-            _ => return true,
+            _ => return false,
         };
 
         let (journal, seal) = match parse_risc0_payload(&proof_payload) {
             Some(parts) => parts,
             None => return false,
         };
+        let expected_journal = compute_expected_journal(&env, session_id, &player, &commitment);
+        if journal != expected_journal {
+            return false;
+        }
 
         let client = Risc0VerifierClient::new(&env, &router);
         client.try_verify(&seal, &image_id, &journal).is_ok()
@@ -119,13 +123,35 @@ fn require_admin(env: &Env) {
     admin.require_auth();
 }
 
+fn compute_expected_journal(
+    env: &Env,
+    session_id: u32,
+    player: &Address,
+    commitment: &Bytes,
+) -> BytesN<32> {
+    let mut preimage = Bytes::new(env);
+    preimage.append(&Bytes::from_array(env, &session_id.to_be_bytes()));
+    preimage.append(&player.to_string().to_bytes());
+    preimage.append(commitment);
+    env.crypto().keccak256(&preimage).into()
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
     use soroban_sdk::testutils::Address as _;
+    use soroban_sdk::{contract, contractimpl};
+
+    #[contract]
+    struct MockRisc0Verifier;
+
+    #[contractimpl]
+    impl MockRisc0Verifier {
+        pub fn verify(_env: Env, _seal: Bytes, _image_id: BytesN<32>, _journal: BytesN<32>) {}
+    }
 
     #[test]
-    fn verify_returns_true_when_not_fully_configured() {
+    fn verify_returns_false_when_not_fully_configured() {
         let env = Env::default();
         env.mock_all_auths();
         let admin = Address::generate(&env);
@@ -152,7 +178,7 @@ mod test {
             &outputs,
         );
 
-        assert!(ok);
+        assert!(!ok);
     }
 
     #[test]
@@ -169,5 +195,113 @@ mod test {
 
         let got = client.get_image_id();
         assert_eq!(got, Some(image_id));
+    }
+
+    #[test]
+    fn verify_rejects_malformed_payload() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let admin = Address::generate(&env);
+        let game_hub = Address::generate(&env);
+        let contract_id = env.register(MineGameVerifierContract, (&admin, &game_hub));
+        let client = MineGameVerifierContractClient::new(&env, &contract_id);
+
+        let router = env.register(MockRisc0Verifier, ());
+        client.set_router(&router);
+        client.set_image_id(&BytesN::from_array(&env, &[9u8; 32]));
+
+        let player = Address::generate(&env);
+        let ok = client.verify(
+            &7u32,
+            &player,
+            &Bytes::from_array(&env, &[1, 2, 3]),
+            &Bytes::from_array(&env, &[4, 5, 6]),
+            &ProofOutputs {
+                move_sequence: Vec::new(&env),
+                resources_per_node: Vec::new(&env),
+                total_resources: 0,
+                final_hull: 0,
+                final_fuel: 0,
+                outcome: 0,
+                evac_intensity: 0,
+            },
+        );
+
+        assert!(!ok);
+    }
+
+    #[test]
+    fn verify_rejects_when_journal_not_bound_to_commitment() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let admin = Address::generate(&env);
+        let game_hub = Address::generate(&env);
+        let contract_id = env.register(MineGameVerifierContract, (&admin, &game_hub));
+        let client = MineGameVerifierContractClient::new(&env, &contract_id);
+
+        let router = env.register(MockRisc0Verifier, ());
+        client.set_router(&router);
+        client.set_image_id(&BytesN::from_array(&env, &[9u8; 32]));
+
+        let player = Address::generate(&env);
+        let commitment = Bytes::from_array(&env, &[0xaa, 0xbb, 0xcc]);
+        let mut bad_payload = Bytes::new(&env);
+        bad_payload.append(&Bytes::from_array(&env, &[0u8; 32]));
+        bad_payload.append(&Bytes::from_array(&env, &[1u8, 2u8, 3u8]));
+        let ok = client.verify(
+            &42u32,
+            &player,
+            &bad_payload,
+            &commitment,
+            &ProofOutputs {
+                move_sequence: Vec::new(&env),
+                resources_per_node: Vec::new(&env),
+                total_resources: 0,
+                final_hull: 0,
+                final_fuel: 0,
+                outcome: 0,
+                evac_intensity: 0,
+            },
+        );
+        assert!(!ok);
+    }
+
+    #[test]
+    fn verify_accepts_when_payload_is_well_formed_and_bound() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let admin = Address::generate(&env);
+        let game_hub = Address::generate(&env);
+        let contract_id = env.register(MineGameVerifierContract, (&admin, &game_hub));
+        let client = MineGameVerifierContractClient::new(&env, &contract_id);
+
+        let router = env.register(MockRisc0Verifier, ());
+        client.set_router(&router);
+        client.set_image_id(&BytesN::from_array(&env, &[9u8; 32]));
+
+        let session_id = 42u32;
+        let player = Address::generate(&env);
+        let commitment = Bytes::from_array(&env, &[0xaa, 0xbb, 0xcc]);
+        let expected = compute_expected_journal(&env, session_id, &player, &commitment);
+        let mut payload = Bytes::new(&env);
+        payload.append(&Bytes::from(expected.clone()));
+        payload.append(&Bytes::from_array(&env, &[1u8, 2u8, 3u8]));
+
+        let ok = client.verify(
+            &session_id,
+            &player,
+            &payload,
+            &commitment,
+            &ProofOutputs {
+                move_sequence: Vec::new(&env),
+                resources_per_node: Vec::new(&env),
+                total_resources: 0,
+                final_hull: 0,
+                final_fuel: 0,
+                outcome: 0,
+                evac_intensity: 0,
+            },
+        );
+        assert!(ok);
     }
 }
