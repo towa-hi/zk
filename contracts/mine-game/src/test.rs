@@ -120,7 +120,7 @@ fn setup_test() -> (
     let verifier_addr = env.register(MockVerifier, ());
     let verifier = MockVerifierClient::new(&env, &verifier_addr);
     let admin = Address::generate(&env);
-    let contract_id = env.register(MineGameContract, (&admin, &hub_addr));
+    let contract_id = env.register(MineGameContract, (&admin, &hub_addr, &verifier_addr));
     game_hub.add_game(&contract_id);
     let client = MineGameContractClient::new(&env, &contract_id);
     client.set_verifier(&verifier_addr);
@@ -322,7 +322,8 @@ fn test_upgrade_function_exists() {
 
     let admin = Address::generate(&env);
     let hub_addr = env.register(MockGameHub, ());
-    let contract_id = env.register(MineGameContract, (&admin, &hub_addr));
+    let verifier_addr = env.register(MockVerifier, ());
+    let contract_id = env.register(MineGameContract, (&admin, &hub_addr, &verifier_addr));
     let client = MineGameContractClient::new(&env, &contract_id);
     let new_wasm_hash = BytesN::from_array(&env, &[1u8; 32]);
     let result = client.try_upgrade(&new_wasm_hash);

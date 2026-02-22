@@ -133,6 +133,7 @@ if (!mock) {
 const needsMock = contracts.some((c) => !c.isMockHub);
 const deployMockRequested = contracts.some((c) => c.isMockHub);
 const shouldEnsureMock = deployMockRequested || needsMock;
+const deployingMineGame = contracts.some((c) => c.packageName === "mine-game");
 
 // Check required WASM files exist for selected contracts (non-mock first)
 const missingWasm: string[] = [];
@@ -166,6 +167,12 @@ for (const identity of ['player1', 'player2']) {
   if (v && v !== 'NOT_AVAILABLE') existingSecrets[identity] = v;
 }
 
+const configuredMineGameVerifierId =
+  process.env.MINE_GAME_VERIFIER_CONTRACT_ID ||
+  process.env.VITE_MINE_GAME_VERIFIER_CONTRACT_ID ||
+  getEnvValue(existingEnv, "MINE_GAME_VERIFIER_CONTRACT_ID") ||
+  getEnvValue(existingEnv, "VITE_MINE_GAME_VERIFIER_CONTRACT_ID");
+
 // Load existing deployment info so partial deploys can preserve other IDs.
 const existingContractIds: Record<string, string> = {};
 let existingDeployment: any = null;
@@ -189,6 +196,13 @@ for (const contract of allContracts) {
   if (existingContractIds[contract.packageName]) continue;
   const envId = getEnvValue(existingEnv, `VITE_${contract.envKey}_CONTRACT_ID`);
   if (envId) existingContractIds[contract.packageName] = envId;
+}
+
+let mineGameVerifierId = configuredMineGameVerifierId || existingContractIds["mine-game-verifier"] || "";
+if (deployingMineGame && !mineGameVerifierId && !contracts.some((c) => c.packageName === "mine-game-verifier")) {
+  console.error("❌ Error: mine-game deployment requires a verifier contract ID.");
+  console.error("Set MINE_GAME_VERIFIER_CONTRACT_ID (or VITE_MINE_GAME_VERIFIER_CONTRACT_ID), or deploy mine-game-verifier in the same run.");
+  process.exit(1);
 }
 
 // Handle admin identity (needs to be in Stellar CLI for deployment)
@@ -288,7 +302,13 @@ if (shouldEnsureMock) {
   }
 }
 
-for (const contract of contracts) {
+const deploymentOrder = [...contracts].sort((a, b) => {
+  if (a.packageName === "mine-game-verifier" && b.packageName === "mine-game") return -1;
+  if (a.packageName === "mine-game" && b.packageName === "mine-game-verifier") return 1;
+  return 0;
+});
+
+for (const contract of deploymentOrder) {
   if (contract.isMockHub) continue;
 
   console.log(`Deploying ${contract.packageName}...`);
@@ -300,10 +320,14 @@ for (const contract of contracts) {
     console.log(`  WASM hash: ${wasmHash}`);
 
     console.log("  Deploying and initializing...");
-    const deployResult =
-      await $`stellar contract deploy --wasm-hash ${wasmHash} --source-account ${adminSecret} --network ${NETWORK} -- --admin ${adminAddress} --game-hub ${mockGameHubId}`.text();
+    const deployResult = contract.packageName === "mine-game"
+      ? await $`stellar contract deploy --wasm-hash ${wasmHash} --source-account ${adminSecret} --network ${NETWORK} -- --admin ${adminAddress} --game-hub ${mockGameHubId} --verifier ${mineGameVerifierId}`.text()
+      : await $`stellar contract deploy --wasm-hash ${wasmHash} --source-account ${adminSecret} --network ${NETWORK} -- --admin ${adminAddress} --game-hub ${mockGameHubId}`.text();
     const contractId = deployResult.trim();
     deployed[contract.packageName] = contractId;
+    if (contract.packageName === "mine-game-verifier") {
+      mineGameVerifierId = contractId;
+    }
     console.log(`✅ ${contract.packageName} deployed: ${contractId}\n`);
   } catch (error) {
     console.error(`❌ Failed to deploy ${contract.packageName}:`, error);

@@ -123,12 +123,15 @@ impl MineGameContract {
     /// # Arguments
     /// * `admin` - Admin address (can upgrade contract)
     /// * `game_hub` - Address of the GameHub contract
-    pub fn __constructor(env: Env, admin: Address, game_hub: Address) {
+    pub fn __constructor(env: Env, admin: Address, game_hub: Address, verifier: Address) {
         // Store admin and GameHub address
         env.storage().instance().set(&DataKey::Admin, &admin);
         env.storage()
             .instance()
             .set(&DataKey::GameHubAddress, &game_hub);
+        env.storage()
+            .instance()
+            .set(&DataKey::VerifierAddress, &verifier);
         env.storage()
             .instance()
             .set(&DataKey::PlanetSeed, &(env.ledger().sequence() as u64));
