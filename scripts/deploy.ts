@@ -172,16 +172,11 @@ const configuredMineGameVerifierId =
   process.env.VITE_MINE_GAME_VERIFIER_CONTRACT_ID ||
   getEnvValue(existingEnv, "MINE_GAME_VERIFIER_CONTRACT_ID") ||
   getEnvValue(existingEnv, "VITE_MINE_GAME_VERIFIER_CONTRACT_ID");
-const configuredMineGameVerifierRouterId =
-  process.env.MINE_GAME_VERIFIER_ROUTER_CONTRACT_ID ||
-  process.env.VITE_MINE_GAME_VERIFIER_ROUTER_CONTRACT_ID ||
-  getEnvValue(existingEnv, "MINE_GAME_VERIFIER_ROUTER_CONTRACT_ID") ||
-  getEnvValue(existingEnv, "VITE_MINE_GAME_VERIFIER_ROUTER_CONTRACT_ID");
-const configuredMineGameImageId =
-  process.env.MINE_GAME_IMAGE_ID_HEX ||
-  process.env.VITE_MINE_GAME_IMAGE_ID_HEX ||
-  getEnvValue(existingEnv, "MINE_GAME_IMAGE_ID_HEX") ||
-  getEnvValue(existingEnv, "VITE_MINE_GAME_IMAGE_ID_HEX");
+const configuredUltraHonkVerifierId =
+  process.env.ULTRAHONK_VERIFIER_CONTRACT_ID ||
+  process.env.VITE_ULTRAHONK_VERIFIER_CONTRACT_ID ||
+  getEnvValue(existingEnv, "ULTRAHONK_VERIFIER_CONTRACT_ID") ||
+  getEnvValue(existingEnv, "VITE_ULTRAHONK_VERIFIER_CONTRACT_ID");
 
 // Load existing deployment info so partial deploys can preserve other IDs.
 const existingContractIds: Record<string, string> = {};
@@ -346,42 +341,19 @@ for (const contract of deploymentOrder) {
 }
 
 const mineGameVerifierContractId = deployed["mine-game-verifier"] || mineGameVerifierId || "";
-if (mineGameVerifierContractId) {
-  if (configuredMineGameVerifierRouterId) {
-    console.log(`Configuring mine-game-verifier router: ${configuredMineGameVerifierRouterId}`);
-    try {
-      await $`stellar contract invoke --id ${mineGameVerifierContractId} --source-account ${adminSecret} --network ${NETWORK} -- set_router --router ${configuredMineGameVerifierRouterId}`.text();
-      console.log("✅ mine-game-verifier router set");
-    } catch (error) {
-      console.error("❌ Failed to set mine-game-verifier router:", error);
-      process.exit(1);
-    }
-  }
-
-  if (configuredMineGameImageId) {
-    const normalized = configuredMineGameImageId.replace(/^0x/, "");
-    if (!/^[0-9a-fA-F]{64}$/.test(normalized)) {
-      console.error("❌ Invalid MINE_GAME_IMAGE_ID_HEX. Expected 32-byte hex string (64 chars).");
-      process.exit(1);
-    }
-    const bytes = Array.from({ length: 32 }, (_, i) => parseInt(normalized.slice(i * 2, i * 2 + 2), 16));
-    const imageIdArg = `[${bytes.join(",")}]`;
-    console.log(`Configuring mine-game-verifier image ID from hex`);
-    try {
-      await $`stellar contract invoke --id ${mineGameVerifierContractId} --source-account ${adminSecret} --network ${NETWORK} -- set_image_id --image_id ${imageIdArg}`.text();
-      console.log("✅ mine-game-verifier image ID set");
-    } catch (error) {
-      console.error("❌ Failed to set mine-game-verifier image ID:", error);
-      process.exit(1);
-    }
-  }
-
-  // Post-deploy sanity checks to surface misconfiguration early.
+if (mineGameVerifierContractId && configuredUltraHonkVerifierId) {
+  console.log(`Configuring mine-game-verifier UltraHonk address: ${configuredUltraHonkVerifierId}`);
   try {
-    const verifierRouter = await $`stellar contract invoke --id ${mineGameVerifierContractId} --source-account ${adminSecret} --network ${NETWORK} -- get_router`.text();
-    const verifierImage = await $`stellar contract invoke --id ${mineGameVerifierContractId} --source-account ${adminSecret} --network ${NETWORK} -- get_image_id`.text();
-    console.log(`mine-game-verifier get_router: ${verifierRouter.trim()}`);
-    console.log(`mine-game-verifier get_image_id: ${verifierImage.trim()}`);
+    await $`stellar contract invoke --id ${mineGameVerifierContractId} --source-account ${adminSecret} --network ${NETWORK} -- set_ultrahonk_address --address ${configuredUltraHonkVerifierId}`.text();
+    console.log("✅ mine-game-verifier UltraHonk address set");
+  } catch (error) {
+    console.error("❌ Failed to set mine-game-verifier UltraHonk address:", error);
+    process.exit(1);
+  }
+
+  try {
+    const ultrahonkAddr = await $`stellar contract invoke --id ${mineGameVerifierContractId} --source-account ${adminSecret} --network ${NETWORK} -- get_ultrahonk_address`.text();
+    console.log(`mine-game-verifier get_ultrahonk_address: ${ultrahonkAddr.trim()}`);
   } catch (error) {
     console.warn("⚠️  Could not run mine-game-verifier post-deploy checks.");
   }

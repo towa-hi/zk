@@ -35,7 +35,8 @@ pub trait Verifier {
         env: Env,
         session_id: u32,
         player: Address,
-        proof_payload: Bytes,
+        vk_json: Bytes,
+        proof_blob: Bytes,
         commitment: Bytes,
         outputs: ProofOutputs,
     ) -> bool;
@@ -256,7 +257,8 @@ impl MineGameContract {
         env: Env,
         session_id: u32,
         player: Address,
-        proof_payload: Bytes,
+        vk_json: Bytes,
+        proof_blob: Bytes,
         submitted_commitment: Bytes,
         public_outputs: ProofOutputs,
     ) -> Result<(), Error> {
@@ -292,7 +294,8 @@ impl MineGameContract {
         let proof_ok = verifier.verify(
             &session_id,
             &player,
-            &proof_payload,
+            &vk_json,
+            &proof_blob,
             &submitted_commitment,
             &public_outputs,
         );

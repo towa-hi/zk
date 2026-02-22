@@ -1,4 +1,3 @@
-import { keccak_256 } from '@noble/hashes/sha3.js';
 import {
   BIOME_TYPES,
   MAX_MOVES,
@@ -7,6 +6,7 @@ import {
   type ProofPayload,
 } from './domain';
 import { encodeLoadout, TEXT_ENCODER, toHex } from './sharedEncoding';
+import { keccak_256 } from '@noble/hashes/sha3.js';
 
 function encodeDirection(direction: 'left' | 'right' | 'up'): number {
   if (direction === 'left') return 1;
@@ -22,14 +22,7 @@ function getSeed(seed: string): string {
   return `keccak_${toHex(keccak_256(TEXT_ENCODER.encode(seed)))}`;
 }
 
-export interface BuildProofPayloadOptions {
-  risc0?: {
-    sealHex: string;
-    journalDigestHex: string;
-  };
-}
-
-export function buildProofPayload(state: EngineState, options: BuildProofPayloadOptions = {}): ProofPayload {
+export function buildProofPayload(state: EngineState): ProofPayload {
   if (!state.salt || !state.commitment) {
     throw new Error('Cannot build proof payload without salt and commitment');
   }
@@ -77,6 +70,5 @@ export function buildProofPayload(state: EngineState, options: BuildProofPayload
       outcome: state.outcome === 'jettisoned' ? 1 : 0,
       evacIntensity,
     },
-    risc0: options.risc0,
   };
 }

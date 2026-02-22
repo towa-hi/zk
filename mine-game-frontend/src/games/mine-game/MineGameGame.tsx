@@ -12,6 +12,7 @@ import { createMineGameEngineAdapter } from './mineGameEngineAdapter';
 import { createMineGameContractAdapter } from './mineGameContractAdapter';
 import { computeCommitment } from './engine/commitment';
 import { buildProofPayload } from './engine/proofPayload';
+import { generateProof } from './services/MineGameNoirService';
 
 const createRandomSessionId = (): number => {
   if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
@@ -179,7 +180,29 @@ export function MineGameGame({
 
       setNotice({
         tone: 'info',
-        message: 'Submitting submit_proof and waiting for on-chain confirmation...',
+        message: 'Generating ZK proof... this may take a moment.',
+      });
+      appendDebugLine('Starting Noir proof generation...');
+
+      try {
+        const { proofBlob, vkBytes } = await generateProof(payload);
+
+        appendDebugLine(`Proof generated (${proofBlob.length} bytes blob, ${vkBytes.length} bytes VK)`);
+        payload.noir = { proofBlob, vkBytes };
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : 'Unknown proof generation error';
+        appendDebugLine(`Proof generation failed: ${msg}`);
+        setNotice({
+          tone: 'error',
+          message: `Proof generation failed: ${msg}`,
+        });
+        setLoading(false);
+        return;
+      }
+
+      setNotice({
+        tone: 'info',
+        message: 'Submitting proof on-chain...',
       });
       const submitResult = await contractAdapter.submitProof({
         sessionId,
@@ -200,7 +223,9 @@ export function MineGameGame({
       setNotice(resultBundle.notice);
       setViewState(engineAdapter.getViewState());
       setEngineStateJson(JSON.stringify(engineAdapter.getEngineState(), null, 2));
-      setProofJson(JSON.stringify(payload, null, 2));
+      setProofJson(JSON.stringify(payload, (_key, value) =>
+        value instanceof Uint8Array ? `Uint8Array(${value.length})` : value
+      , 2));
       appendDebugLine(
         resultBundle.result.ok
           ? `Action applied; now in ${engineAdapter.getViewState().phase.toUpperCase()}`

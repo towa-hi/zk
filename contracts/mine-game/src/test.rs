@@ -4,6 +4,7 @@ use crate::{Error, MineGameContract, MineGameContractClient, ProofOutputs};
 use soroban_sdk::testutils::{Address as _, Ledger as _};
 use soroban_sdk::{Bytes, BytesN, Env, contract, contractimpl, contracttype, vec, Address};
 
+
 #[contract]
 pub struct MockGameHub;
 
@@ -82,30 +83,16 @@ impl MockVerifier {
 
     pub fn verify(
         env: Env,
-        session_id: u32,
-        player: Address,
-        proof_payload: Bytes,
-        commitment: Bytes,
+        _session_id: u32,
+        _player: Address,
+        _vk_json: Bytes,
+        _proof_blob: Bytes,
+        _commitment: Bytes,
         _outputs: ProofOutputs,
     ) -> bool {
         let mode: u32 = env.storage().instance().get(&VerifierDataKey::Mode).unwrap_or(0);
         if mode == 1 {
             return false;
-        }
-        if mode == 2 {
-            return proof_payload.len() > 32;
-        }
-        if mode == 3 {
-            if proof_payload.len() <= 32 {
-                return false;
-            }
-            let journal_slice = proof_payload.slice(0..32);
-            let journal = match soroban_sdk::BytesN::<32>::try_from(journal_slice) {
-                Ok(v) => v,
-                Err(_) => return false,
-            };
-            let expected = compute_expected_journal(&env, session_id, &player, &commitment);
-            return journal == expected;
         }
         env.storage()
             .instance()
@@ -238,9 +225,11 @@ fn test_commit_then_submit_proof_happy_path() {
 
     client.start_game(&session_id, &player, &player, &points, &0i128);
     client.commit_loadout(&session_id, &player, &commitment);
+    let vk = Bytes::from_array(&env, &[1, 2]);
     client.submit_proof(
         &session_id,
         &player,
+        &vk,
         &proof,
         &commitment,
         &outputs,
@@ -271,6 +260,7 @@ fn test_submit_proof_without_commitment_rejected() {
     let result = client.try_submit_proof(
         &session_id,
         &player,
+        &Bytes::from_array(&env, &[1]),
         &Bytes::from_array(&env, &[7]),
         &Bytes::from_array(&env, &[1]),
         &sample_outputs(&env, 0, 2),
@@ -300,9 +290,11 @@ fn test_duplicate_proof_submission_rejected() {
 
     client.start_game(&session_id, &player, &player, &100_0000000, &0i128);
     client.commit_loadout(&session_id, &player, &commitment);
+    let vk = Bytes::from_array(&env, &[1, 2]);
     client.submit_proof(
         &session_id,
         &player,
+        &vk,
         &proof,
         &commitment,
         &outputs,
@@ -311,6 +303,7 @@ fn test_duplicate_proof_submission_rejected() {
     let result = client.try_submit_proof(
         &session_id,
         &player,
+        &vk,
         &proof,
         &commitment,
         &outputs,
@@ -331,6 +324,7 @@ fn test_verifier_failure_rejected_and_hub_not_ended() {
     let result = client.try_submit_proof(
         &session_id,
         &player,
+        &Bytes::from_array(&env, &[1]),
         &Bytes::from_array(&env, &[9, 9]),
         &commitment,
         &sample_outputs(&env, 1, 0),
@@ -360,6 +354,7 @@ fn test_invalid_public_outputs_rejected() {
         &session_id,
         &player,
         &Bytes::from_array(&env, &[1]),
+        &Bytes::from_array(&env, &[2]),
         &commitment,
         &bad_outputs,
     );
@@ -393,31 +388,10 @@ fn sample_outputs(env: &Env, outcome: u32, evac_intensity: u32) -> ProofOutputs 
     }
 }
 
-fn compute_expected_journal(
-    env: &Env,
-    session_id: u32,
-    player: &Address,
-    commitment: &Bytes,
-) -> soroban_sdk::BytesN<32> {
-    let mut preimage = Bytes::new(env);
-    preimage.append(&Bytes::from_array(env, &session_id.to_be_bytes()));
-    preimage.append(&player.to_string().to_bytes());
-    preimage.append(commitment);
-    env.crypto().keccak256(&preimage).into()
-}
-
-fn build_bound_payload(env: &Env, session_id: u32, player: &Address, commitment: &Bytes) -> Bytes {
-    let journal = compute_expected_journal(env, session_id, player, commitment);
-    let mut payload = Bytes::new(env);
-    payload.append(&Bytes::from(journal));
-    payload.append(&Bytes::from_array(env, &[1u8, 2u8, 3u8]));
-    payload
-}
-
 #[test]
-fn test_submit_proof_rejects_malformed_payload_when_verifier_checks_format() {
+fn test_submit_proof_rejects_when_verifier_mode_rejects() {
     let (env, client, _hub, verifier, _admin, player) = setup_test();
-    verifier.set_mode(&2);
+    verifier.set_mode(&1);
 
     let session_id = 8u32;
     let commitment = Bytes::from_array(&env, &[7, 7, 7, 7]);
@@ -427,53 +401,10 @@ fn test_submit_proof_rejects_malformed_payload_when_verifier_checks_format() {
     let result = client.try_submit_proof(
         &session_id,
         &player,
+        &Bytes::from_array(&env, &[1]),
         &Bytes::from_array(&env, &[1, 2, 3]),
         &commitment,
         &sample_outputs(&env, 0, 2),
     );
     assert_contract_error(&result, Error::InvalidProof);
-}
-
-#[test]
-fn test_submit_proof_rejects_unbound_journal_when_verifier_enforces_binding() {
-    let (env, client, _hub, verifier, _admin, player) = setup_test();
-    verifier.set_mode(&3);
-
-    let session_id = 9u32;
-    let commitment = Bytes::from_array(&env, &[2, 4, 6, 8]);
-    client.start_game(&session_id, &player, &player, &100_0000000, &0i128);
-    client.commit_loadout(&session_id, &player, &commitment);
-
-    let mut bad_payload = Bytes::new(&env);
-    bad_payload.append(&Bytes::from_array(&env, &[0u8; 32]));
-    bad_payload.append(&Bytes::from_array(&env, &[9u8, 9u8]));
-
-    let result = client.try_submit_proof(
-        &session_id,
-        &player,
-        &bad_payload,
-        &commitment,
-        &sample_outputs(&env, 0, 2),
-    );
-    assert_contract_error(&result, Error::InvalidProof);
-}
-
-#[test]
-fn test_submit_proof_accepts_bound_journal_payload() {
-    let (env, client, _hub, verifier, _admin, player) = setup_test();
-    verifier.set_mode(&3);
-
-    let session_id = 10u32;
-    let commitment = Bytes::from_array(&env, &[5, 4, 3, 2, 1]);
-    client.start_game(&session_id, &player, &player, &100_0000000, &0i128);
-    client.commit_loadout(&session_id, &player, &commitment);
-    let payload = build_bound_payload(&env, session_id, &player, &commitment);
-
-    client.submit_proof(
-        &session_id,
-        &player,
-        &payload,
-        &commitment,
-        &sample_outputs(&env, 0, 2),
-    );
 }
