@@ -176,6 +176,33 @@ fn test_start_and_get_game_state() {
 }
 
 #[test]
+fn test_start_game_resets_existing_player_state() {
+    let (env, client, _hub, _verifier, _admin, player) = setup_test();
+    let first_session_id = 101u32;
+    let second_session_id = 202u32;
+    let first_points = 111_0000000i128;
+    let second_points = 222_0000000i128;
+    let commitment = Bytes::from_array(&env, &[1, 9, 9, 1]);
+
+    client.start_game(&first_session_id, &player, &player, &first_points, &0i128);
+    client.commit_loadout(&first_session_id, &player, &commitment);
+
+    // Starting a new game for the same player should reset stale in-progress state.
+    client.start_game(&second_session_id, &player, &player, &second_points, &0i128);
+
+    let first_game_lookup = client.try_get_game(&first_session_id);
+    assert_contract_error(&first_game_lookup, Error::GameNotFound);
+
+    let first_commitment_lookup = client.try_get_commitment(&first_session_id, &player);
+    assert_contract_error(&first_commitment_lookup, Error::MissingCommitment);
+
+    let second_game = client.get_game(&second_session_id);
+    assert_eq!(second_game.player1, player);
+    assert_eq!(second_game.player1_points, second_points);
+    assert!(!second_game.proof_submitted);
+}
+
+#[test]
 fn test_get_game_not_found() {
     let (_env, client, _hub, _verifier, _admin, _player) = setup_test();
     let missing_session_id = 999u32;

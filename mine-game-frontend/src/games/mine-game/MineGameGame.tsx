@@ -10,6 +10,8 @@ import type {
 import { MineGameSurface } from './MineGameSurface';
 import { createMineGameEngineAdapter } from './mineGameEngineAdapter';
 import { createMineGameContractAdapter } from './mineGameContractAdapter';
+import { computeCommitment } from './engine/commitment';
+import { buildProofPayload } from './engine/proofPayload';
 
 const createRandomSessionId = (): number => {
   if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
@@ -73,6 +75,10 @@ export function MineGameGame({
   const startFromMenu = async () => {
     if (loading) return;
     setLoading(true);
+    setNotice({
+      tone: 'info',
+      message: 'Submitting start_game and waiting for on-chain confirmation...',
+    });
     const nextSessionId = createRandomSessionId();
     const nextAdapter = createMineGameEngineAdapter({
       sessionId: nextSessionId,
@@ -121,16 +127,93 @@ export function MineGameGame({
     setLoading(true);
     const phase = engineAdapter.getViewState().phase;
     appendDebugLine(`Engine action requested from ${phase.toUpperCase()}`);
+    if (phase === 'build') {
+      const salt = `ui-auto-${Date.now()}`;
+      const predictedCommitment = computeCommitment(engineAdapter.getEngineState().loadout, salt);
+      setNotice({
+        tone: 'info',
+        message: 'Submitting commit_loadout and waiting for on-chain confirmation...',
+      });
+      const commitResult = await contractAdapter.commitLoadout({
+        sessionId,
+        playerAddress: userAddress,
+        commitment: predictedCommitment,
+      });
+      appendDebugLine(`Contract commit: ${commitResult.status} (${commitResult.message})`);
+      if (!commitResult.ok) {
+        setNotice({
+          tone: 'error',
+          message: commitResult.message,
+        });
+        setLoading(false);
+        return;
+      }
 
-    const resultBundle =
-      phase === 'build'
-        ? engineAdapter.applyAction({ type: 'confirm_build', salt: `ui-auto-${Date.now()}` })
-        : phase === 'explore'
-          ? engineAdapter.applyAction({ type: 'evacuate' })
-          : phase === 'prove'
-            ? engineAdapter.applyAction({ type: 'request_proof_payload' })
-            : null;
+      const resultBundle = engineAdapter.applyAction({ type: 'confirm_build', salt });
+      setNotice(resultBundle.notice);
+      setViewState(engineAdapter.getViewState());
+      setEngineStateJson(JSON.stringify(engineAdapter.getEngineState(), null, 2));
+      const proofPayload = engineAdapter.getProofPayload();
+      setProofJson(proofPayload ? JSON.stringify(proofPayload, null, 2) : null);
+      appendDebugLine(
+        resultBundle.result.ok
+          ? `Action applied; now in ${engineAdapter.getViewState().phase.toUpperCase()}`
+          : `Action rejected (${resultBundle.result.error?.code ?? 'unknown'})`
+      );
+      setLoading(false);
+      return;
+    }
 
+    if (phase === 'prove') {
+      let payload;
+      try {
+        payload = buildProofPayload(engineAdapter.getEngineState());
+      } catch (error) {
+        setNotice({
+          tone: 'error',
+          message: error instanceof Error ? error.message : 'Failed to build proof payload',
+        });
+        setLoading(false);
+        return;
+      }
+
+      setNotice({
+        tone: 'info',
+        message: 'Submitting submit_proof and waiting for on-chain confirmation...',
+      });
+      const submitResult = await contractAdapter.submitProof({
+        sessionId,
+        playerAddress: userAddress,
+        payload,
+      });
+      appendDebugLine(`Contract proof submit: ${submitResult.status} (${submitResult.message})`);
+      if (!submitResult.ok) {
+        setNotice({
+          tone: 'error',
+          message: submitResult.message,
+        });
+        setLoading(false);
+        return;
+      }
+
+      const resultBundle = engineAdapter.applyAction({ type: 'request_proof_payload' });
+      setNotice(resultBundle.notice);
+      setViewState(engineAdapter.getViewState());
+      setEngineStateJson(JSON.stringify(engineAdapter.getEngineState(), null, 2));
+      setProofJson(JSON.stringify(payload, null, 2));
+      appendDebugLine(
+        resultBundle.result.ok
+          ? `Action applied; now in ${engineAdapter.getViewState().phase.toUpperCase()}`
+          : `Action rejected (${resultBundle.result.error?.code ?? 'unknown'})`
+      );
+      if (resultBundle.result.ok && engineAdapter.getViewState().phase === 'done') {
+        onGameComplete();
+      }
+      setLoading(false);
+      return;
+    }
+
+    const resultBundle = phase === 'explore' ? engineAdapter.applyAction({ type: 'evacuate' }) : null;
     if (resultBundle) {
       setNotice(resultBundle.notice);
       setViewState(engineAdapter.getViewState());
@@ -142,39 +225,6 @@ export function MineGameGame({
           ? `Action applied; now in ${engineAdapter.getViewState().phase.toUpperCase()}`
           : `Action rejected (${resultBundle.result.error?.code ?? 'unknown'})`
       );
-      if (resultBundle.result.ok && phase === 'prove' && engineAdapter.getViewState().phase === 'done') {
-        onGameComplete();
-      }
-
-      if (resultBundle.result.ok && phase === 'build') {
-        const commitResult = await contractAdapter.commitLoadout({
-          sessionId,
-          playerAddress: userAddress,
-          commitment: engineAdapter.getEngineState().commitment,
-        });
-        appendDebugLine(`Contract commit: ${commitResult.status} (${commitResult.message})`);
-        if (!commitResult.ok) {
-          setNotice({
-            tone: 'error',
-            message: commitResult.message,
-          });
-        }
-      }
-
-      if (resultBundle.result.ok && phase === 'prove') {
-        const submitResult = await contractAdapter.submitProof({
-          sessionId,
-          playerAddress: userAddress,
-          payload: engineAdapter.getProofPayload(),
-        });
-        appendDebugLine(`Contract proof submit: ${submitResult.status} (${submitResult.message})`);
-        if (!submitResult.ok) {
-          setNotice({
-            tone: 'error',
-            message: submitResult.message,
-          });
-        }
-      }
     }
     setLoading(false);
   };

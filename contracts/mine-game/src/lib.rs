@@ -93,6 +93,7 @@ pub enum DataKey {
     Game(u32),
     Commitment(u32, Address),
     Result(u32, Address),
+    ActiveSession(Address),
     GameHubAddress,
     VerifierAddress,
     Admin,
@@ -157,13 +158,27 @@ impl MineGameContract {
         player1_points: i128,
         _player2_points: i128,
     ) -> Result<(), Error> {
-        let game_key = DataKey::Game(session_id);
-        if env.storage().temporary().has(&game_key) {
-            return Err(Error::SessionAlreadyExists);
-        }
-
         // Single-player mode only needs player auth.
         player1.require_auth_for_args(vec![&env, session_id.into_val(&env), player1_points.into_val(&env)]);
+
+        let active_session_key = DataKey::ActiveSession(player1.clone());
+        let active_session: Option<u32> = env.storage().temporary().get(&active_session_key);
+        if let Some(existing_session_id) = active_session {
+            reset_player_session_state(&env, existing_session_id, &player1);
+        }
+
+        let game_key = DataKey::Game(session_id);
+        if env.storage().temporary().has(&game_key) {
+            let existing_game: Game = env
+                .storage()
+                .temporary()
+                .get(&game_key)
+                .ok_or(Error::GameNotFound)?;
+            if existing_game.player1 != player1 {
+                return Err(Error::SessionAlreadyExists);
+            }
+            reset_player_session_state(&env, session_id, &player1);
+        }
 
         // Represent the house as this contract address in the game and hub session.
         let house_player = env.current_contract_address();
@@ -199,7 +214,11 @@ impl MineGameContract {
 
         // Store game in temporary storage with 30-day TTL
         env.storage().temporary().set(&game_key, &game);
+        env.storage()
+            .temporary()
+            .set(&active_session_key, &session_id);
         extend_temp_ttl(&env, &game_key);
+        extend_temp_ttl(&env, &active_session_key);
 
         // Event emitted by the Game Hub contract (GameStarted)
 
@@ -452,6 +471,28 @@ fn extend_temp_ttl(env: &Env, key: &DataKey) {
     env.storage()
         .temporary()
         .extend_ttl(key, GAME_TTL_LEDGERS, GAME_TTL_LEDGERS);
+}
+
+fn reset_player_session_state(env: &Env, session_id: u32, player: &Address) {
+    let game_key = DataKey::Game(session_id);
+    let stored_game: Option<Game> = env.storage().temporary().get(&game_key);
+    if let Some(game) = stored_game {
+        if &game.player1 == player {
+            env.storage().temporary().remove(&game_key);
+        }
+    }
+
+    let commitment_key = DataKey::Commitment(session_id, player.clone());
+    env.storage().temporary().remove(&commitment_key);
+
+    let result_key = DataKey::Result(session_id, player.clone());
+    env.storage().temporary().remove(&result_key);
+
+    let active_session_key = DataKey::ActiveSession(player.clone());
+    let active_session: Option<u32> = env.storage().temporary().get(&active_session_key);
+    if active_session == Some(session_id) {
+        env.storage().temporary().remove(&active_session_key);
+    }
 }
 
 fn validate_outputs(outputs: &ProofOutputs) -> Result<(), Error> {
