@@ -43,6 +43,7 @@ export default function App() {
       ) : (
         <MineGameGame
           userAddress={userAddress}
+          contractId={contractId}
           onGameComplete={() => {}}
         />
       )}

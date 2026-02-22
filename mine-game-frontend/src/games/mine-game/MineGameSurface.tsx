@@ -491,7 +491,7 @@ export function MineGameSurface(props: MineGameSurfaceProps) {
                 onClick={props.actions.resetScreens}
                 disabled={loading}
               >
-                Back To Build
+                Back To Menu
               </button>
             ) : null}
           </div>

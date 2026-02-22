@@ -26,6 +26,7 @@ const createRandomSessionId = (): number => {
 
 interface MineGameGameProps {
   userAddress: string;
+  contractId: string;
   onGameComplete: () => void;
 }
 
@@ -33,8 +34,10 @@ const createPlanetSeed = (sessionId: number): string => `ui-seed-${sessionId}`;
 
 export function MineGameGame({
   userAddress,
+  contractId,
   onGameComplete,
 }: MineGameGameProps) {
+  const [screen, setScreen] = useState<'menu' | 'game'>('menu');
   const [sessionId, setSessionId] = useState<number>(() => createRandomSessionId());
   const [loading, setLoading] = useState(false);
   const [notice, setNotice] = useState<UiNotice | null>(null);
@@ -48,7 +51,7 @@ export function MineGameGame({
     })
   );
   const [contractAdapter, setContractAdapter] = useState(() =>
-    createMineGameContractAdapter()
+    createMineGameContractAdapter({ contractId })
   );
   const [viewState, setViewState] = useState<MineGameViewState>(() => engineAdapter.getViewState());
   const [debugLines, setDebugLines] = useState<string[]>([]);
@@ -64,8 +67,54 @@ export function MineGameGame({
   useEffect(() => {
     setEngineStateJson(JSON.stringify(engineAdapter.getEngineState(), null, 2));
     setViewState(engineAdapter.getViewState());
-    appendDebugLine('Entered BUILD screen');
+    appendDebugLine('Entered start menu');
   }, []);
+
+  const startFromMenu = async () => {
+    if (loading) return;
+    setLoading(true);
+    const nextSessionId = createRandomSessionId();
+    const nextAdapter = createMineGameEngineAdapter({
+      sessionId: nextSessionId,
+      userAddress,
+      planetSeed: createPlanetSeed(nextSessionId),
+    });
+    const nextContractAdapter = createMineGameContractAdapter();
+    const resolvedContractId = contractId || nextContractAdapter.getContractId();
+    appendDebugLine(`Using contract ${resolvedContractId || '(none configured)'}`, nextSessionId);
+    const nextConfiguredContractAdapter = createMineGameContractAdapter({ contractId: resolvedContractId });
+    const startGameResult = await nextConfiguredContractAdapter.startGame({
+      sessionId: nextSessionId,
+      playerAddress: userAddress,
+      playerPoints: 0n,
+    });
+    if (!startGameResult.ok) {
+      setNotice({
+        tone: 'error',
+        message: startGameResult.message,
+      });
+      setLoading(false);
+      return;
+    }
+
+    setEngineAdapter(nextAdapter);
+    setContractAdapter(nextConfiguredContractAdapter);
+    setSessionId(nextSessionId);
+    setViewState(nextAdapter.getViewState());
+    setEngineStateJson(JSON.stringify(nextAdapter.getEngineState(), null, 2));
+    setProofJson(null);
+    setNotice(null);
+    setScreen('game');
+    const time = new Date().toLocaleTimeString();
+    const createdLine = `${time} Session ${nextSessionId} created`;
+    const chainStartLine = `${time} Contract start_game: ${startGameResult.status} (${startGameResult.message})`;
+    const enteredBuildLine = `${time} Entered BUILD screen`;
+    console.log(`[MineGame][Session ${nextSessionId}] ${createdLine}`);
+    console.log(`[MineGame][Session ${nextSessionId}] ${chainStartLine}`);
+    console.log(`[MineGame][Session ${nextSessionId}] ${enteredBuildLine}`);
+    setDebugLines([createdLine, chainStartLine, enteredBuildLine]);
+    setLoading(false);
+  };
 
   const goToNextPhase = async () => {
     if (loading) return;
@@ -137,7 +186,7 @@ export function MineGameGame({
       userAddress,
       planetSeed: createPlanetSeed(nextSessionId),
     });
-    const nextContractAdapter = createMineGameContractAdapter();
+    const nextContractAdapter = createMineGameContractAdapter({ contractId });
     setEngineAdapter(nextAdapter);
     setContractAdapter(nextContractAdapter);
     setSessionId(nextSessionId);
@@ -146,9 +195,10 @@ export function MineGameGame({
     setProofJson(null);
     setNotice(null);
     setLoading(false);
+    setScreen('menu');
     const time = new Date().toLocaleTimeString();
     const createdLine = `${time} Session ${nextSessionId} created`;
-    const resetLine = `${time} Reset to BUILD screen`;
+    const resetLine = `${time} Returned to start menu`;
     console.log(`[MineGame][Session ${nextSessionId}] ${createdLine}`);
     console.log(`[MineGame][Session ${nextSessionId}] ${resetLine}`);
     setDebugLines([createdLine, resetLine]);
@@ -216,6 +266,26 @@ export function MineGameGame({
     moveToNode,
     evacuate,
   };
+
+  if (screen === 'menu') {
+    return (
+      <div className="relative h-full w-full bg-white/70 backdrop-blur-xl rounded-none p-0 shadow-xl border-2 border-purple-200 flex items-center justify-center">
+        <div className="rounded-lg border border-green-900/30 bg-white/80 px-6 py-5 text-center">
+          <p className="text-xs tracking-[0.2em] text-green-950 font-semibold">STELLAR EXPLORER</p>
+          <h2 className="mt-2 text-2xl font-black text-green-950">START MENU</h2>
+          <p className="mt-2 text-sm text-green-950/85">Start a new run to enter BUILD phase.</p>
+          <button
+            type="button"
+            className="mt-4 h-[30px] px-4 rounded text-sm bg-purple-700 text-white font-semibold disabled:opacity-60"
+            onClick={startFromMenu}
+            disabled={loading}
+          >
+            {loading ? 'Starting...' : 'Start Game'}
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <MineGameSurface
