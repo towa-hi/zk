@@ -1,0 +1,6 @@
+[package]
+name = "mine_game_v0"
+type = "bin"
+authors = ["kaguya"]
+
+[dependencies]
