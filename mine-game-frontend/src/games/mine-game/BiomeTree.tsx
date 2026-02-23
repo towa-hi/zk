@@ -15,6 +15,7 @@ interface BiomeTreeProps {
   nodes: PlanetNodeView[];
   currentNodeId?: number;
   visitedNodeIds?: number[];
+  traversedEdges?: Array<[number, number]>;
   selectedNodeId?: number;
   onSelectNode?: (nodeId: number) => void;
 }
@@ -36,6 +37,13 @@ const INTENSITY_LABEL: Record<1 | 2 | 3, string> = {
   1: 'Low',
   2: 'Medium',
   3: 'High',
+};
+
+const HAZARD_EMOJI: Record<string, string> = {
+  heat: '🔥',
+  cold: '❄️',
+  bio: '🐛',
+  rad: '☢️',
 };
 
 const MIN_HIT_RADIUS = 8;
@@ -152,6 +160,7 @@ export function BiomeTree({
   nodes,
   currentNodeId,
   visitedNodeIds: _visitedNodeIds = [],
+  traversedEdges = [],
   selectedNodeId,
   onSelectNode,
 }: BiomeTreeProps) {
@@ -198,6 +207,15 @@ export function BiomeTree({
 
   const hoveredPos = hoveredNode ? posMap.get(hoveredNode.id) : null;
   const tooltipAbove = hoveredPos ? hoveredPos.y > VIEW_SIZE * 0.18 : true;
+  const traversedEdgeSet = useMemo(() => {
+    const set = new Set<string>();
+    for (const [a, b] of traversedEdges) {
+      const left = Math.min(a, b);
+      const right = Math.max(a, b);
+      set.add(`${left}-${right}`);
+    }
+    return set;
+  }, [traversedEdges]);
 
   return (
     <div
@@ -269,6 +287,8 @@ export function BiomeTree({
           const p = posMap.get(parentId);
           const c = posMap.get(node.id);
           if (!p || !c) return null;
+          const edgeKey = `${Math.min(parentId, node.id)}-${Math.max(parentId, node.id)}`;
+          const isTraversed = traversedEdgeSet.has(edgeKey);
 
           return (
             <g key={`edge-${node.id}`}>
@@ -277,7 +297,7 @@ export function BiomeTree({
                 y1={p.y}
                 x2={c.x}
                 y2={c.y}
-                stroke="rgba(15, 23, 42, 0.34)"
+                stroke={isTraversed ? 'rgba(251, 191, 36, 0.55)' : 'rgba(15, 23, 42, 0.34)'}
                 strokeWidth={3.4}
                 style={{ pointerEvents: 'none' }}
               />
@@ -286,7 +306,7 @@ export function BiomeTree({
                 y1={p.y}
                 x2={c.x}
                 y2={c.y}
-                stroke="rgba(56, 189, 248, 0.98)"
+                stroke={isTraversed ? 'rgba(245, 158, 11, 1)' : 'rgba(56, 189, 248, 0.98)'}
                 strokeWidth={1.9}
                 style={{ pointerEvents: 'none' }}
               />
@@ -393,8 +413,15 @@ export function BiomeTree({
           }}
         >
           <div className="bg-gray-900/90 backdrop-blur-sm text-white text-[11px] leading-snug rounded-lg px-3 py-2 shadow-lg border border-purple-500/30 whitespace-nowrap">
-            <p className="font-semibold text-xs">
-              {formatBiomeName(hoveredNode.biomeType)}
+            <p className="font-semibold text-xs inline-flex items-center gap-1.5">
+              <span>{formatBiomeName(hoveredNode.biomeType)}</span>
+              <span className="inline-flex items-center gap-1">
+                {hoveredNode.hazards.map((hazard, idx) => (
+                  <span key={`${hoveredNode.id}-${hazard}-${idx}`} aria-label={hazard} title={hazard}>
+                    {HAZARD_EMOJI[hazard] ?? hazard}
+                  </span>
+                ))}
+              </span>
             </p>
             <p className="text-white/60 mt-0.5">
               Depth {hoveredNode.depth} &middot; Intensity{' '}

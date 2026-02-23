@@ -59,6 +59,9 @@ export function createMineGameEngineAdapter(
         explore: {
           currentNodeId: state.currentNodeId,
           visitedNodeIds: [...state.visitedNodeIds],
+          traversedEdges: state.moveResults.map((move) => [move.fromNodeId, move.toNodeId] as [number, number]),
+          moveCount: state.moveCount,
+          outcome: state.outcome,
           hull: state.hull,
           fuel: state.fuel,
           cargo: state.cargo,

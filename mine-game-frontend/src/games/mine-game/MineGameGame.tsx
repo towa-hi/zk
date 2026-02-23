@@ -231,6 +231,14 @@ export function MineGameGame({
         setLoading(false);
         return;
       }
+      if (submitResult.status !== 'submitted') {
+        setNotice({
+          tone: 'error',
+          message: `Proof not confirmed on-chain (${submitResult.status}). Staying on PROVE screen.`,
+        });
+        setLoading(false);
+        return;
+      }
 
       const resultBundle = engineAdapter.applyAction({ type: 'request_proof_payload' });
       setNotice(resultBundle.notice);

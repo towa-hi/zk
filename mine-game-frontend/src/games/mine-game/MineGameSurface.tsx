@@ -48,6 +48,20 @@ const EXTRACTOR_DISPLAY_MULTIPLIER_BY_TIER: Record<PartTier, string> = {
   advanced: '1.5',
 };
 
+const RESISTANCE_ICON_BY_CATEGORY: Partial<Record<LoadoutCategory, string>> = {
+  thermal_shielding: '🔥',
+  cryo_insulation: '❄️',
+  bio_filter: '🐛',
+  rad_hardening: '☢️',
+};
+
+const EXTRACTOR_ICON_BY_CATEGORY: Partial<Record<LoadoutCategory, string>> = {
+  thermal_extractor: '🔥',
+  cryo_extractor: '❄️',
+  bio_extractor: '🐛',
+  rad_extractor: '☢️',
+};
+
 function getTierOptions(category: LoadoutCategory): TierOption[] {
   if (
     category === 'thermal_shielding' ||
@@ -55,9 +69,11 @@ function getTierOptions(category: LoadoutCategory): TierOption[] {
     category === 'bio_filter' ||
     category === 'rad_hardening'
   ) {
+    const hazardIcon = RESISTANCE_ICON_BY_CATEGORY[category] ?? '';
+    const resistanceLabel = hazardIcon ? `${hazardIcon} Resistance` : 'Resistance';
     return [
-      { tier: 'standard', label: 'Standard', effect: 'Resistance +0', weight: 0 },
-      { tier: 'enhanced', label: 'Enhanced', effect: 'Resistance +1', weight: 2 },
+      { tier: 'standard', label: 'Standard', effect: `${resistanceLabel} +0`, weight: 0 },
+      { tier: 'enhanced', label: 'Enhanced', effect: `${resistanceLabel} +1`, weight: 2 },
     ];
   }
   if (category === 'fuel_tank') {
@@ -74,10 +90,13 @@ function getTierOptions(category: LoadoutCategory): TierOption[] {
       { tier: 'advanced', label: 'Advanced', effect: 'Cargo 225', weight: 5 },
     ];
   }
+
+  const extractorIcon = EXTRACTOR_ICON_BY_CATEGORY[category] ?? '';
+  const multiplierLabel = extractorIcon ? `${extractorIcon} Multiplier` : 'Multiplier';
   return [
-    { tier: 'standard', label: 'Standard', effect: 'Multiplier x1.0', weight: 0 },
-    { tier: 'enhanced', label: 'Enhanced', effect: 'Multiplier x1.2', weight: 2 },
-    { tier: 'advanced', label: 'Advanced', effect: 'Multiplier x1.5', weight: 5 },
+    { tier: 'standard', label: 'Standard', effect: `${multiplierLabel} x1.0`, weight: 0 },
+    { tier: 'enhanced', label: 'Enhanced', effect: `${multiplierLabel} x1.2`, weight: 2 },
+    { tier: 'advanced', label: 'Advanced', effect: `${multiplierLabel} x1.5`, weight: 5 },
   ];
 }
 
@@ -86,6 +105,12 @@ function toTitleCase(value: string): string {
     .split('_')
     .map((token) => token.charAt(0).toUpperCase() + token.slice(1))
     .join(' ');
+}
+
+function tierTextClass(tier: TierChoice): string {
+  if (tier === 'standard') return 'text-slate-700';
+  if (tier === 'enhanced') return 'text-blue-700';
+  return 'text-purple-700';
 }
 
 const HAZARD_EMOJI: Record<string, string> = {
@@ -220,10 +245,38 @@ export function MineGameSurface(props: MineGameSurfaceProps) {
     return props.state.planetNodes.find((n) => n.id === selectedNodeId) ?? null;
   }, [selectedNodeId, props.state.planetNodes]);
 
+  const nodeById = useMemo(() => {
+    const m = new Map<number, PlanetNodeView>();
+    for (const node of props.state.planetNodes ?? []) m.set(node.id, node);
+    return m;
+  }, [props.state.planetNodes]);
+
   const movePreview = useMemo(() => {
     if (!selectedNode || !explore) return null;
     return computeMovePreview(selectedNode, explore);
   }, [selectedNode, explore]);
+
+  const runSummary = useMemo(() => {
+    if (!explore) return null;
+    const visitedCount = explore.visitedNodeIds.length;
+    const maxDepth = explore.visitedNodeIds.reduce(
+      (max, nodeId) => Math.max(max, nodeById.get(nodeId)?.depth ?? 0),
+      0,
+    );
+    const currentNodeDepth = nodeById.get(explore.currentNodeId)?.depth ?? 0;
+    return {
+      visitedCount,
+      maxDepth,
+      currentNodeDepth,
+      moveCount: explore.moveCount,
+      resources: explore.resources,
+      hull: explore.hull,
+      fuel: explore.fuel,
+      cargo: explore.cargo,
+      maxCargo: explore.maxCargo,
+      outcome: explore.outcome,
+    };
+  }, [explore, nodeById]);
 
   const phaseTitle =
     phase === 'build'
@@ -244,13 +297,7 @@ export function MineGameSurface(props: MineGameSurfaceProps) {
           : 'Run complete. Return to build to start another placeholder flow.';
 
   const nextButtonLabel =
-    phase === 'build'
-      ? 'Confirm Loadout → Explore'
-      : phase === 'explore'
-        ? 'End Run → Prove'
-        : phase === 'prove'
-          ? 'Submit Proof → Done'
-          : null;
+    phase === 'prove' ? 'Submit Proof → Done' : null;
 
   return (
     <div className="relative h-full w-full bg-white/70 backdrop-blur-xl rounded-none p-0 shadow-xl border-2 border-purple-200 flex items-center justify-center">
@@ -276,13 +323,13 @@ export function MineGameSurface(props: MineGameSurfaceProps) {
         <div className="h-full w-full flex flex-col">
           <div
             className="flex-1 border-b border-green-700/40 flex items-center justify-center px-6"
-            style={phase === 'explore'
+            style={phase === 'explore' || phase === 'build' || phase === 'prove' || phase === 'done'
               ? {
                   backgroundImage: `url(${spaceTexture})`,
                   backgroundPosition: 'center',
                   backgroundSize: 'cover',
                 }
-              : { backgroundColor: 'rgb(74 222 128 / 0.7)' }}
+              : { backgroundImage: `url(${spaceTexture})`, backgroundPosition: 'center', backgroundSize: 'cover' }}
           >
             {phase === 'build' && buildState ? (
               <div className="w-full h-full py-3 min-h-0">
@@ -293,6 +340,7 @@ export function MineGameSurface(props: MineGameSurfaceProps) {
                       {ATTACHMENT_POINTS.map((point) => {
                         const active = selectedCategory === point.category;
                         const tier = buildState.loadout[point.category];
+                        const equippedOption = getTierOptions(point.category).find((option) => option.tier === tier);
                         return (
                           <button
                             key={point.category}
@@ -301,11 +349,15 @@ export function MineGameSurface(props: MineGameSurfaceProps) {
                             className={`w-full text-left rounded border px-2 py-1.5 text-xs ${
                               active
                                 ? 'border-purple-700 bg-purple-50 text-purple-950'
-                                : 'border-green-900/20 bg-white/70 text-green-950 hover:bg-green-50'
+                                : 'border-green-900/20 bg-white/70 text-green-950 hover:bg-white/90'
                             }`}
                           >
-                            <div className="font-semibold">{point.label}</div>
-                            <div className="text-[11px] opacity-80">Selected: {tier}</div>
+                            <div className="font-semibold">
+                              {point.label}:{' '}
+                              <span className={tierTextClass(tier)}>{toTitleCase(tier)}</span>
+                            </div>
+                            <div className="text-[11px] opacity-80">Effect: {equippedOption?.effect ?? '-'}</div>
+                            <div className="text-[11px] opacity-80">Weight: {equippedOption?.weight ?? '-'}</div>
                           </button>
                         );
                       })}
@@ -318,33 +370,45 @@ export function MineGameSurface(props: MineGameSurfaceProps) {
                       {ATTACHMENT_POINTS.find((point) => point.category === selectedCategory)?.label}
                     </p>
                     <div className="mt-2 min-h-0 flex-1 overflow-auto space-y-1 pr-1">
-                      {getTierOptions(selectedCategory).map((option) => {
+                      {(() => {
+                        const tierOptions = getTierOptions(selectedCategory);
+                        const currentTier = buildState.loadout[selectedCategory];
+                        const currentOption = tierOptions.find((option) => option.tier === currentTier);
+                        const currentWeight = currentOption?.weight ?? 0;
+
+                        return tierOptions.map((option) => {
                         const currentTier = buildState.loadout[selectedCategory];
                         const active = currentTier === option.tier;
+                        const projectedWeight = buildState.totalWeight - currentWeight + option.weight;
+                        const overBudget = projectedWeight > buildState.maxWeight;
                         return (
                           <button
                             key={option.tier}
                             type="button"
                             onClick={() => props.actions.setPartTier(selectedCategory, option.tier)}
+                            disabled={overBudget}
                             className={`w-full text-left rounded border px-2 py-1.5 ${
                               active
                                 ? 'border-purple-700 bg-purple-50 text-purple-950'
-                                : 'border-green-900/20 bg-white/70 text-green-950 hover:bg-green-50'
-                            }`}
+                                : 'border-green-900/20 bg-white/70 text-green-950 hover:bg-white/90'
+                            } disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-white/70`}
                           >
-                            <div className="font-semibold text-xs">{option.label}</div>
+                            <div className={`font-semibold text-xs ${tierTextClass(option.tier)}`}>
+                              {option.label}
+                            </div>
                             <div className="text-[11px] opacity-85">Effect: {option.effect}</div>
                             <div className="text-[11px] opacity-85">Weight: {option.weight}</div>
                           </button>
                         );
-                      })}
+                        });
+                      })()}
                     </div>
                   </div>
 
-                  <div className="rounded-lg border border-green-900/30 bg-green-50/75 p-2 min-h-0 flex flex-col text-green-950">
+                  <div className="rounded-lg border border-green-900/30 bg-white/75 p-2 min-h-0 flex flex-col text-green-950">
                     <p className="text-xs tracking-[0.2em] font-semibold">PROBE STATS</p>
                     <p className="mt-1 text-[10px] opacity-70">Viewing: {toTitleCase(selectedCategory)}</p>
-                    <div className="mt-2 min-h-0 overflow-auto">
+                    <div className="mt-2 min-h-0 flex-1 overflow-auto">
                       <div className="grid grid-cols-2 gap-x-2 gap-y-1 text-[11px]">
                         <p>Weight</p>
                         <p className="text-right font-semibold">
@@ -358,31 +422,39 @@ export function MineGameSurface(props: MineGameSurfaceProps) {
                         <p className="text-right font-semibold">
                           {CARGO_BY_TIER[buildState.loadout.cargo_hold]}
                         </p>
-                        <p>Resist Heat</p>
+                        <p>Resist 🔥</p>
                         <p className="text-right font-semibold">
                           {buildState.loadout.thermal_shielding === 'enhanced' ? 1 : 0}
                         </p>
-                        <p>Resist Cold</p>
+                        <p>Resist ❄️</p>
                         <p className="text-right font-semibold">
                           {buildState.loadout.cryo_insulation === 'enhanced' ? 1 : 0}
                         </p>
-                        <p>Resist Bio</p>
+                        <p>Resist 🐛</p>
                         <p className="text-right font-semibold">
                           {buildState.loadout.bio_filter === 'enhanced' ? 1 : 0}
                         </p>
-                        <p>Resist Rad</p>
+                        <p>Resist ☢️</p>
                         <p className="text-right font-semibold">
                           {buildState.loadout.rad_hardening === 'enhanced' ? 1 : 0}
                         </p>
                       </div>
                       <div className="mt-2 border-t border-green-900/15 pt-1 text-[11px]">
                         <p className="font-semibold">Extractor Multipliers</p>
-                        <p>Heat: x{EXTRACTOR_DISPLAY_MULTIPLIER_BY_TIER[buildState.loadout.thermal_extractor]}</p>
-                        <p>Cold: x{EXTRACTOR_DISPLAY_MULTIPLIER_BY_TIER[buildState.loadout.cryo_extractor]}</p>
-                        <p>Bio: x{EXTRACTOR_DISPLAY_MULTIPLIER_BY_TIER[buildState.loadout.bio_extractor]}</p>
-                        <p>Rad: x{EXTRACTOR_DISPLAY_MULTIPLIER_BY_TIER[buildState.loadout.rad_extractor]}</p>
+                        <p>🔥: x{EXTRACTOR_DISPLAY_MULTIPLIER_BY_TIER[buildState.loadout.thermal_extractor]}</p>
+                        <p>❄️: x{EXTRACTOR_DISPLAY_MULTIPLIER_BY_TIER[buildState.loadout.cryo_extractor]}</p>
+                        <p>🐛: x{EXTRACTOR_DISPLAY_MULTIPLIER_BY_TIER[buildState.loadout.bio_extractor]}</p>
+                        <p>☢️: x{EXTRACTOR_DISPLAY_MULTIPLIER_BY_TIER[buildState.loadout.rad_extractor]}</p>
                       </div>
                     </div>
+                    <button
+                      type="button"
+                      className="mt-2 h-[24px] rounded text-[11px] leading-none bg-purple-700 text-white font-semibold disabled:opacity-60"
+                      onClick={props.actions.goToNextPhase}
+                      disabled={loading}
+                    >
+                      {loading ? 'Working...' : 'Confirm Loadout → Explore'}
+                    </button>
                   </div>
                 </div>
               </div>
@@ -393,6 +465,7 @@ export function MineGameSurface(props: MineGameSurfaceProps) {
                     nodes={props.state.planetNodes}
                     currentNodeId={explore.currentNodeId}
                     visitedNodeIds={explore.visitedNodeIds}
+                    traversedEdges={explore.traversedEdges}
                     selectedNodeId={selectedNodeId ?? undefined}
                     onSelectNode={setSelectedNodeId}
                   />
@@ -404,8 +477,8 @@ export function MineGameSurface(props: MineGameSurfaceProps) {
                       className="rounded border border-green-900/30 px-2 py-1.5 text-green-950"
                       style={{
                         backgroundImage: BIOME_TEXTURE[selectedNode.biomeType]
-                          ? `linear-gradient(to top, rgba(255, 255, 255, 0.92), rgba(255, 255, 255, 0.35) 52%, rgba(255, 255, 255, 0.05) 100%), url(${BIOME_TEXTURE[selectedNode.biomeType]})`
-                          : 'linear-gradient(to top, rgba(255,255,255,0.92), rgba(255,255,255,0.35) 52%, rgba(255,255,255,0.05) 100%)',
+                          ? `linear-gradient(to bottom, rgba(255, 255, 255, 0.92), rgba(255, 255, 255, 0.35) 52%, rgba(255, 255, 255, 0.05) 100%), url(${BIOME_TEXTURE[selectedNode.biomeType]})`
+                          : 'linear-gradient(to bottom, rgba(255,255,255,0.92), rgba(255,255,255,0.35) 52%, rgba(255,255,255,0.05) 100%)',
                         backgroundPosition: 'center',
                         backgroundSize: 'cover',
                       }}
@@ -537,43 +610,110 @@ export function MineGameSurface(props: MineGameSurfaceProps) {
                   </div>
                 )}
               </div>
+            ) : phase === 'prove' && runSummary ? (
+              <div className="w-full max-w-[560px] rounded-xl border border-purple-300/50 bg-white/85 backdrop-blur-sm p-5 text-slate-900 shadow-xl">
+                <p className="text-xs tracking-[0.2em] text-purple-900 font-semibold">PROOF PHASE</p>
+                <h2 className="mt-2 text-2xl font-black">Finalize This Run</h2>
+                <p className="mt-2 text-sm text-slate-800/85">
+                  Your run is complete. Submit the proof to lock in results on-chain.
+                </p>
+                <div className="mt-4 grid grid-cols-2 gap-x-4 gap-y-1 text-[13px]">
+                  <p>Outcome</p>
+                  <p className="text-right font-semibold">
+                    {runSummary.outcome === 'evacuated'
+                      ? 'Evacuated'
+                      : runSummary.outcome === 'jettisoned'
+                        ? 'Ditched Probe'
+                        : 'In Progress'}
+                  </p>
+                  <p>Resources</p>
+                  <p className="text-right font-semibold">{runSummary.resources}</p>
+                  <p>Moves</p>
+                  <p className="text-right font-semibold">{runSummary.moveCount}</p>
+                  <p>Nodes Visited</p>
+                  <p className="text-right font-semibold">{runSummary.visitedCount}</p>
+                  <p>Peak Depth</p>
+                  <p className="text-right font-semibold">{runSummary.maxDepth}</p>
+                </div>
+                <div className="mt-5 flex items-center justify-end gap-2">
+                  <button
+                    type="button"
+                    className="h-[30px] px-4 rounded text-[12px] leading-none bg-purple-700 text-white font-semibold disabled:opacity-60"
+                    onClick={props.actions.goToNextPhase}
+                    disabled={loading}
+                  >
+                    {loading ? 'Submitting Proof...' : 'Submit Proof → Done'}
+                  </button>
+                </div>
+              </div>
+            ) : phase === 'done' && runSummary ? (
+              <div className="w-full max-w-[620px] rounded-xl border border-emerald-300/55 bg-white/85 backdrop-blur-sm p-5 text-slate-900 shadow-xl">
+                <p className="text-xs tracking-[0.2em] text-emerald-900 font-semibold">RUN COMPLETE</p>
+                <h2 className="mt-2 text-2xl font-black">Expedition Summary</h2>
+                <p className="mt-2 text-sm text-slate-800/85">
+                  Here&apos;s how your latest Planet Alpha run ended.
+                </p>
+
+                <div className="mt-4 grid grid-cols-2 gap-3 text-[13px]">
+                  <div className="rounded border border-slate-300/60 bg-white/80 px-3 py-2">
+                    <p className="text-[10px] tracking-[0.15em] text-slate-600 font-semibold">OUTCOME</p>
+                    <p className="mt-1 text-base font-bold">
+                      {runSummary.outcome === 'evacuated'
+                        ? 'Evacuated'
+                        : runSummary.outcome === 'jettisoned'
+                          ? 'Ditched Probe'
+                          : 'In Progress'}
+                    </p>
+                  </div>
+                  <div className="rounded border border-slate-300/60 bg-white/80 px-3 py-2">
+                    <p className="text-[10px] tracking-[0.15em] text-slate-600 font-semibold">RESOURCES KEPT</p>
+                    <p className="mt-1 text-base font-bold">{runSummary.resources}</p>
+                  </div>
+                  <div className="rounded border border-slate-300/60 bg-white/80 px-3 py-2">
+                    <p className="text-[10px] tracking-[0.15em] text-slate-600 font-semibold">ROUTE</p>
+                    <p className="mt-1 text-sm font-semibold">
+                      {runSummary.moveCount} moves · {runSummary.visitedCount} nodes · depth {runSummary.maxDepth}
+                    </p>
+                  </div>
+                  <div className="rounded border border-slate-300/60 bg-white/80 px-3 py-2">
+                    <p className="text-[10px] tracking-[0.15em] text-slate-600 font-semibold">FINAL STATUS</p>
+                    <p className="mt-1 text-sm font-semibold">
+                      Hull {runSummary.hull} · Fuel {runSummary.fuel} · Cargo {runSummary.cargo}/{runSummary.maxCargo}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="mt-5 flex items-center justify-end">
+                  <button
+                    type="button"
+                    className="h-[30px] px-4 rounded text-[12px] leading-none bg-gray-900 text-white font-semibold disabled:opacity-60"
+                    onClick={props.actions.resetScreens}
+                    disabled={loading}
+                  >
+                    Back To Menu
+                  </button>
+                </div>
+              </div>
             ) : (
               <div className="text-center max-w-xl">
                 <p className="text-xs tracking-[0.2em] text-green-950 font-semibold">STELLAR EXPLORER</p>
                 <h2 className="mt-2 text-3xl font-black text-green-950">{phaseTitle} SCREEN</h2>
                 <p className="text-sm text-green-950/85 mt-3">{phaseDescription}</p>
+                <div className="mt-4 flex items-center justify-center gap-2">
+                  {nextButtonLabel ? (
+                    <button
+                      type="button"
+                      className="h-[28px] px-3 rounded text-[12px] leading-none bg-purple-700 text-white font-semibold disabled:opacity-60"
+                      onClick={props.actions.goToNextPhase}
+                      disabled={loading}
+                    >
+                      {loading ? 'Working...' : nextButtonLabel}
+                    </button>
+                  ) : null}
+                </div>
               </div>
             )}
           </div>
-
-          {phase !== 'explore' && (
-            <div
-              className="bg-orange-500/90 border-t border-orange-700/60 flex items-center justify-center gap-2 px-2"
-              style={{ height: '25px' }}
-            >
-              {nextButtonLabel ? (
-                <button
-                  type="button"
-                  className="h-[20px] px-2 rounded text-[11px] leading-none bg-purple-700 text-white font-semibold disabled:opacity-60"
-                  onClick={props.actions.goToNextPhase}
-                  disabled={loading}
-                >
-                  {loading ? 'Working...' : nextButtonLabel}
-                </button>
-              ) : null}
-
-              {phase === 'done' ? (
-                <button
-                  type="button"
-                  className="h-[20px] px-2 rounded text-[11px] leading-none bg-gray-900 text-white font-semibold disabled:opacity-60"
-                  onClick={props.actions.resetScreens}
-                  disabled={loading}
-                >
-                  Back To Menu
-                </button>
-              ) : null}
-            </div>
-          )}
         </div>
       </div>
     </div>

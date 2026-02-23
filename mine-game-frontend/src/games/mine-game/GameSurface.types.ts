@@ -33,6 +33,9 @@ export interface PlanetNodeView {
 export interface ExploreViewState {
   currentNodeId: number;
   visitedNodeIds: number[];
+  traversedEdges: Array<[number, number]>;
+  moveCount: number;
+  outcome: 'in_progress' | 'evacuated' | 'jettisoned';
   hull: number;
   fuel: number;
   cargo: number;
