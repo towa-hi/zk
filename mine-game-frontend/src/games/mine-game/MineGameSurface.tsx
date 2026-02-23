@@ -9,6 +9,17 @@ import type {
 } from './GameSurface.types';
 import { ATTACHMENT_POINTS } from './ProbeBlueprint';
 import { BiomeTree } from './BiomeTree';
+import spaceTexture from './assets/space.jpg';
+import magmaFieldsTexture from './assets/magma-fields.png';
+import deepFreezeTexture from './assets/deep-freeze.png';
+import hiveSprawlTexture from './assets/hive-sprawl.png';
+import alienRuinsTexture from './assets/alien-ruins.png';
+import thermalVentsTexture from './assets/thermal-vents.png';
+import emberJungleTexture from './assets/ember-jungle.png';
+import slagWastesTexture from './assets/slag-wastes.png';
+import cryoMarshTexture from './assets/cryo-marsh.png';
+import falloutTundraTexture from './assets/fallout-tundra.png';
+import mutantThicketTexture from './assets/mutant-thicket.png';
 
 type TierChoice = PartTier | ResistancePartTier;
 
@@ -82,6 +93,19 @@ const HAZARD_LABEL: Record<string, string> = {
   cold: 'Cold',
   bio: 'Bio',
   rad: 'Rad',
+};
+
+const BIOME_TEXTURE: Record<string, string> = {
+  magma_fields: magmaFieldsTexture,
+  deep_freeze: deepFreezeTexture,
+  hive_sprawl: hiveSprawlTexture,
+  alien_ruins: alienRuinsTexture,
+  thermal_vents: thermalVentsTexture,
+  ember_jungle: emberJungleTexture,
+  slag_wastes: slagWastesTexture,
+  cryo_marsh: cryoMarshTexture,
+  fallout_tundra: falloutTundraTexture,
+  mutant_thicket: mutantThicketTexture,
 };
 
 const RESOURCE_BASE: Record<number, number> = { 1: 1, 2: 3, 3: 5 };
@@ -221,7 +245,16 @@ export function MineGameSurface(props: MineGameSurfaceProps) {
       ) : null}
       <div className="!rounded-none relative overflow-hidden min-h-[500px] min-w-[500px] max-h-full max-w-full aspect-square h-full w-full">
         <div className="h-full w-full flex flex-col">
-          <div className="flex-1 bg-green-500/70 border-b border-green-700/40 flex items-center justify-center px-6">
+          <div
+            className="flex-1 border-b border-green-700/40 flex items-center justify-center px-6"
+            style={phase === 'explore'
+              ? {
+                  backgroundImage: `url(${spaceTexture})`,
+                  backgroundPosition: 'center',
+                  backgroundSize: 'cover',
+                }
+              : { backgroundColor: 'rgb(74 222 128 / 0.7)' }}
+          >
             {phase === 'build' && buildState ? (
               <div className="w-full h-full py-3 min-h-0">
                 <div className="h-full min-h-0 grid grid-cols-3 gap-3">
@@ -338,7 +371,16 @@ export function MineGameSurface(props: MineGameSurfaceProps) {
 
                 {selectedNode && movePreview && (
                   <div className="shrink-0 grid grid-cols-3 gap-1.5">
-                    <div className="rounded border border-green-900/30 bg-white/70 px-2 py-1.5 text-green-950">
+                    <div
+                      className="rounded border border-green-900/30 px-2 py-1.5 text-green-950"
+                      style={{
+                        backgroundImage: BIOME_TEXTURE[selectedNode.biomeType]
+                          ? `linear-gradient(to top, rgba(255, 255, 255, 0.92), rgba(255, 255, 255, 0.35) 52%, rgba(255, 255, 255, 0.05) 100%), url(${BIOME_TEXTURE[selectedNode.biomeType]})`
+                          : 'linear-gradient(to top, rgba(255,255,255,0.92), rgba(255,255,255,0.35) 52%, rgba(255,255,255,0.05) 100%)',
+                        backgroundPosition: 'center',
+                        backgroundSize: 'cover',
+                      }}
+                    >
                       <p className="text-[10px] tracking-[0.15em] font-semibold opacity-60">SELECTED BIOME</p>
                       <p className="text-xs font-bold mt-0.5">{toTitleCase(selectedNode.biomeType)}</p>
                       <p className="text-[11px] opacity-75">
@@ -469,32 +511,34 @@ export function MineGameSurface(props: MineGameSurfaceProps) {
             )}
           </div>
 
-          <div
-            className="bg-orange-500/90 border-t border-orange-700/60 flex items-center justify-center gap-2 px-2"
-            style={{ height: '25px' }}
-          >
-            {nextButtonLabel ? (
-              <button
-                type="button"
-                className="h-[20px] px-2 rounded text-[11px] leading-none bg-purple-700 text-white font-semibold disabled:opacity-60"
-                onClick={props.actions.goToNextPhase}
-                disabled={loading}
-              >
-                {loading ? 'Working...' : nextButtonLabel}
-              </button>
-            ) : null}
+          {phase !== 'explore' && (
+            <div
+              className="bg-orange-500/90 border-t border-orange-700/60 flex items-center justify-center gap-2 px-2"
+              style={{ height: '25px' }}
+            >
+              {nextButtonLabel ? (
+                <button
+                  type="button"
+                  className="h-[20px] px-2 rounded text-[11px] leading-none bg-purple-700 text-white font-semibold disabled:opacity-60"
+                  onClick={props.actions.goToNextPhase}
+                  disabled={loading}
+                >
+                  {loading ? 'Working...' : nextButtonLabel}
+                </button>
+              ) : null}
 
-            {phase === 'done' ? (
-              <button
-                type="button"
-                className="h-[20px] px-2 rounded text-[11px] leading-none bg-gray-900 text-white font-semibold disabled:opacity-60"
-                onClick={props.actions.resetScreens}
-                disabled={loading}
-              >
-                Back To Menu
-              </button>
-            ) : null}
-          </div>
+              {phase === 'done' ? (
+                <button
+                  type="button"
+                  className="h-[20px] px-2 rounded text-[11px] leading-none bg-gray-900 text-white font-semibold disabled:opacity-60"
+                  onClick={props.actions.resetScreens}
+                  disabled={loading}
+                >
+                  Back To Menu
+                </button>
+              ) : null}
+            </div>
+          )}
         </div>
       </div>
     </div>

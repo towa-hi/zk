@@ -1,5 +1,15 @@
 import { useState, useMemo } from 'react';
 import type { PlanetNodeView } from './GameSurface.types';
+import magmaFieldsTexture from './assets/magma-fields.png';
+import deepFreezeTexture from './assets/deep-freeze.png';
+import hiveSprawlTexture from './assets/hive-sprawl.png';
+import alienRuinsTexture from './assets/alien-ruins.png';
+import thermalVentsTexture from './assets/thermal-vents.png';
+import emberJungleTexture from './assets/ember-jungle.png';
+import slagWastesTexture from './assets/slag-wastes.png';
+import cryoMarshTexture from './assets/cryo-marsh.png';
+import falloutTundraTexture from './assets/fallout-tundra.png';
+import mutantThicketTexture from './assets/mutant-thicket.png';
 
 interface BiomeTreeProps {
   nodes: PlanetNodeView[];
@@ -20,9 +30,9 @@ const BASE_RADIUS: Record<number, number> = {
 };
 
 const INTENSITY_FILL: Record<1 | 2 | 3, string> = {
-  1: '#6ee7b7',
-  2: '#fbbf24',
-  3: '#fb7185',
+  1: '#67e8f9',
+  2: '#a78bfa',
+  3: '#f43f5e',
 };
 
 const INTENSITY_LABEL: Record<1 | 2 | 3, string> = {
@@ -32,6 +42,23 @@ const INTENSITY_LABEL: Record<1 | 2 | 3, string> = {
 };
 
 const MIN_HIT_RADIUS = 8;
+const CIRCLE_SEGMENTS = 96;
+const EPSILON = 1e-6;
+
+type Point = { x: number; y: number };
+
+const BIOME_TEXTURE: Record<string, string> = {
+  magma_fields: magmaFieldsTexture,
+  deep_freeze: deepFreezeTexture,
+  hive_sprawl: hiveSprawlTexture,
+  alien_ruins: alienRuinsTexture,
+  thermal_vents: thermalVentsTexture,
+  ember_jungle: emberJungleTexture,
+  slag_wastes: slagWastesTexture,
+  cryo_marsh: cryoMarshTexture,
+  fallout_tundra: falloutTundraTexture,
+  mutant_thicket: mutantThicketTexture,
+};
 
 function nodePosition(nodeId: number): { x: number; y: number } {
   const depth = Math.floor(Math.log2(nodeId));
@@ -70,13 +97,82 @@ function treeHopDistance(a: number, b: number): number {
   return (aDepth - lcaDepth) + distB;
 }
 
-function falloff(dist: number): { opacity: number; scale: number } {
-  if (dist <= 1) return { opacity: 1, scale: 1.15 };
-  if (dist === 2) return { opacity: 0.85, scale: 1.0 };
-  if (dist === 3) return { opacity: 0.6, scale: 0.9 };
-  if (dist === 4) return { opacity: 0.35, scale: 0.8 };
-  if (dist === 5) return { opacity: 0.2, scale: 0.7 };
-  return { opacity: 0.1, scale: 0.6 };
+function falloff(dist: number): { scale: number } {
+  if (dist <= 1) return { scale: 1.15 };
+  if (dist === 2) return { scale: 1.0 };
+  if (dist === 3) return { scale: 0.9 };
+  if (dist === 4) return { scale: 0.8 };
+  if (dist === 5) return { scale: 0.7 };
+  return { scale: 0.6 };
+}
+
+function makeCirclePolygon(cx: number, cy: number, radius: number, segments: number): Point[] {
+  const points: Point[] = [];
+  for (let i = 0; i < segments; i++) {
+    const a = (i / segments) * Math.PI * 2;
+    points.push({
+      x: cx + Math.cos(a) * radius,
+      y: cy + Math.sin(a) * radius,
+    });
+  }
+  return points;
+}
+
+function clipPolygonToHalfPlane(
+  polygon: Point[],
+  a: number,
+  b: number,
+  c: number,
+): Point[] {
+  if (polygon.length === 0) return polygon;
+  const out: Point[] = [];
+
+  for (let i = 0; i < polygon.length; i++) {
+    const s = polygon[i];
+    const e = polygon[(i + 1) % polygon.length];
+    const sInside = a * s.x + b * s.y <= c + EPSILON;
+    const eInside = a * e.x + b * e.y <= c + EPSILON;
+
+    if (sInside && eInside) {
+      out.push(e);
+      continue;
+    }
+
+    if (sInside !== eInside) {
+      const dx = e.x - s.x;
+      const dy = e.y - s.y;
+      const denom = a * dx + b * dy;
+      if (Math.abs(denom) > EPSILON) {
+        const t = (c - a * s.x - b * s.y) / denom;
+        out.push({
+          x: s.x + dx * t,
+          y: s.y + dy * t,
+        });
+      }
+    }
+
+    if (!sInside && eInside) {
+      out.push(e);
+    }
+  }
+
+  return out;
+}
+
+function polygonToPath(polygon: Point[]): string {
+  if (polygon.length === 0) return '';
+  const first = polygon[0];
+  const commands = [`M ${first.x} ${first.y}`];
+  for (let i = 1; i < polygon.length; i++) {
+    const p = polygon[i];
+    commands.push(`L ${p.x} ${p.y}`);
+  }
+  commands.push('Z');
+  return commands.join(' ');
+}
+
+function texturePatternId(nodeId: number): string {
+  return `biome-texture-${nodeId}`;
 }
 
 function formatBiomeName(raw: string): string {
@@ -89,12 +185,11 @@ function formatBiomeName(raw: string): string {
 export function BiomeTree({
   nodes,
   currentNodeId,
-  visitedNodeIds = [],
+  visitedNodeIds: _visitedNodeIds = [],
   selectedNodeId,
   onSelectNode,
 }: BiomeTreeProps) {
   const [hoveredNode, setHoveredNode] = useState<PlanetNodeView | null>(null);
-  const visitedSet = useMemo(() => new Set(visitedNodeIds), [visitedNodeIds]);
 
   const posMap = useMemo(() => {
     const m = new Map<number, { x: number; y: number }>();
@@ -112,6 +207,38 @@ export function BiomeTree({
   }, [nodes, currentNodeId]);
 
   const hasFocus = currentNodeId != null;
+  const voronoiCells = useMemo(() => {
+    const baseCircle = makeCirclePolygon(CENTER, CENTER, OUTER_RADIUS, CIRCLE_SEGMENTS);
+    const sites = nodes
+      .map((node) => {
+        const pos = posMap.get(node.id);
+        if (!pos) return null;
+        return { node, pos };
+      })
+      .filter((entry): entry is { node: PlanetNodeView; pos: Point } => entry != null);
+
+    return sites
+      .map(({ node, pos }) => {
+        let poly = baseCircle;
+        for (const other of sites) {
+          if (other.node.id === node.id) continue;
+
+          const dx = other.pos.x - pos.x;
+          const dy = other.pos.y - pos.y;
+          const c = (other.pos.x * other.pos.x + other.pos.y * other.pos.y - pos.x * pos.x - pos.y * pos.y) / 2;
+          poly = clipPolygonToHalfPlane(poly, dx, dy, c);
+          if (poly.length < 3) break;
+        }
+
+        if (poly.length < 3) return null;
+        return {
+          nodeId: node.id,
+          path: polygonToPath(poly),
+          textureUrl: BIOME_TEXTURE[node.biomeType] ?? null,
+        };
+      })
+      .filter((cell): cell is { nodeId: number; path: string; textureUrl: string | null } => cell != null);
+  }, [nodes, posMap]);
 
   const hoveredPos = hoveredNode ? posMap.get(hoveredNode.id) : null;
   const tooltipAbove = hoveredPos ? hoveredPos.y > VIEW_SIZE * 0.18 : true;
@@ -125,14 +252,48 @@ export function BiomeTree({
         viewBox={`0 0 ${VIEW_SIZE} ${VIEW_SIZE}`}
         className="absolute inset-0 w-full h-full"
       >
+        <defs>
+          {voronoiCells
+            .filter((cell) => cell.textureUrl != null)
+            .map((cell) => (
+              <pattern
+                key={`pattern-${cell.nodeId}`}
+                id={texturePatternId(cell.nodeId)}
+                patternUnits="userSpaceOnUse"
+                width={64}
+                height={64}
+              >
+                <image
+                  href={cell.textureUrl ?? undefined}
+                  x={0}
+                  y={0}
+                  width={64}
+                  height={64}
+                  preserveAspectRatio="xMidYMid slice"
+                />
+              </pattern>
+            ))}
+        </defs>
+
         <circle
           cx={CENTER}
           cy={CENTER}
           r={OUTER_RADIUS}
-          fill="rgba(139, 92, 246, 0.04)"
+          fill="rgba(186, 230, 253, 0.9)"
           stroke="rgba(139, 92, 246, 0.25)"
           strokeWidth={2}
         />
+
+        {voronoiCells.map((cell) => (
+          <path
+            key={`cell-${cell.nodeId}`}
+            d={cell.path}
+            fill={cell.textureUrl ? `url(#${texturePatternId(cell.nodeId)})` : 'rgba(139, 92, 246, 0.12)'}
+            fillOpacity={0.75}
+            stroke="rgba(139, 92, 246, 0.08)"
+            strokeWidth={0.6}
+          />
+        ))}
 
         {[1, 2, 3, 4, 5, 6].map((d) => (
           <circle
@@ -153,24 +314,27 @@ export function BiomeTree({
           const c = posMap.get(node.id);
           if (!p || !c) return null;
 
-          const maxDist = hasFocus
-            ? Math.max(distMap.get(parentId) ?? 12, distMap.get(node.id) ?? 12)
-            : 0;
-          const edgeOpacity = hasFocus
-            ? Math.max(0.03, falloff(maxDist).opacity * 0.45)
-            : 0.18;
-
           return (
-            <line
-              key={`edge-${node.id}`}
-              x1={p.x}
-              y1={p.y}
-              x2={c.x}
-              y2={c.y}
-              stroke="rgba(139, 92, 246, 1)"
-              strokeWidth={1}
-              opacity={edgeOpacity}
-            />
+            <g key={`edge-${node.id}`}>
+              <line
+                x1={p.x}
+                y1={p.y}
+                x2={c.x}
+                y2={c.y}
+                stroke="rgba(15, 23, 42, 0.34)"
+                strokeWidth={3.4}
+                style={{ pointerEvents: 'none' }}
+              />
+              <line
+                x1={p.x}
+                y1={p.y}
+                x2={c.x}
+                y2={c.y}
+                stroke="rgba(56, 189, 248, 0.98)"
+                strokeWidth={1.9}
+                style={{ pointerEvents: 'none' }}
+              />
+            </g>
           );
         })}
 
@@ -180,7 +344,6 @@ export function BiomeTree({
 
           const isCurrent = node.id === currentNodeId;
           const isSelected = node.id === selectedNodeId;
-          const isVisited = visitedSet.has(node.id);
           const isHovered = hoveredNode?.id === node.id;
           const dist = distMap.get(node.id) ?? 0;
           const baseR = BASE_RADIUS[node.depth] ?? 3;
@@ -193,17 +356,17 @@ export function BiomeTree({
 
           if (isCurrent) {
             r = baseR * 1.8;
-            fill = '#7c3aed';
+            fill = '#2563eb';
             stroke = '#ffffff';
-            sw = 2;
+            sw = 2.2;
             opacity = 1;
           } else {
-            const f = hasFocus ? falloff(dist) : { opacity: 1, scale: 1 };
+            const f = hasFocus ? falloff(dist) : { scale: 1 };
             r = baseR * f.scale;
             fill = INTENSITY_FILL[node.intensity];
-            stroke = 'rgba(0,0,0,0.12)';
-            sw = 0.5;
-            opacity = isVisited ? f.opacity * 0.55 : f.opacity;
+            stroke = 'rgba(15, 23, 42, 0.4)';
+            sw = 0.9;
+            opacity = 1;
           }
 
           if (isHovered && !isCurrent) {

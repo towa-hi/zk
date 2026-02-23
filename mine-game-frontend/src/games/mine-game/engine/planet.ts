@@ -34,7 +34,8 @@ export function generatePlanet(seedInput: string): Planet {
     chainHash = nextChainHash(chainHash, nodeId);
     const depth = getNodeDepth(nodeId);
     const intensity = getIntensityForDepth(depth);
-    const biomeType = biomeFromHash(chainHash);
+    const leftSiblingBiomeType = getLeftSiblingBiomeType(nodeId, nodes);
+    const biomeType = biomeFromHash(chainHash, leftSiblingBiomeType);
 
     nodes.push({
       id: nodeId,
@@ -48,10 +49,18 @@ export function generatePlanet(seedInput: string): Planet {
   return { seed, nodes };
 }
 
-function biomeFromHash(hashBytes: Uint8Array): BiomeType {
+function biomeFromHash(hashBytes: Uint8Array, siblingBiomeType?: BiomeType): BiomeType {
   const value = uint32FromBytes(hashBytes);
   const idx = value % BIOME_TYPES.length;
-  return BIOME_TYPES[idx];
+  const candidate = BIOME_TYPES[idx];
+  if (!siblingBiomeType || candidate !== siblingBiomeType) {
+    return candidate;
+  }
+
+  // For right siblings, rotate to a different biome using hash entropy.
+  const offset = ((hashBytes[4] ?? hashBytes[0] ?? 0) % (BIOME_TYPES.length - 1)) + 1;
+  const alternateIdx = (idx + offset) % BIOME_TYPES.length;
+  return BIOME_TYPES[alternateIdx];
 }
 
 function nextChainHash(currentHash: Uint8Array, nodeId: number): Uint8Array {
@@ -59,6 +68,13 @@ function nextChainHash(currentHash: Uint8Array, nodeId: number): Uint8Array {
   input.set(currentHash, 0);
   writeU32Be(input, currentHash.length, nodeId);
   return keccak_256(input);
+}
+
+function getLeftSiblingBiomeType(nodeId: number, nodes: PlanetNode[]): BiomeType | undefined {
+  if (nodeId <= 1 || nodeId % 2 === 0) return undefined;
+  const leftSibling = nodes[nodeId - 2];
+  if (!leftSibling || leftSibling.id !== nodeId - 1) return undefined;
+  return leftSibling.biomeType;
 }
 
 function uint32FromBytes(bytes: Uint8Array): number {

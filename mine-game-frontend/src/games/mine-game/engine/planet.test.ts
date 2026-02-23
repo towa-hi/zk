@@ -37,4 +37,16 @@ describe('planet generation', () => {
     const bSignature = b.nodes.slice(0, 10).map((n) => n.biomeType).join('|');
     expect(aSignature).not.toBe(bSignature);
   });
+
+  it('avoids duplicate biome type for sibling nodes', () => {
+    const planet = generatePlanet('sibling-check');
+    for (let leftId = 2; leftId < NODE_COUNT; leftId += 2) {
+      const rightId = leftId + 1;
+      const left = planet.nodes[leftId - 1];
+      const right = planet.nodes[rightId - 1];
+      expect(left).toBeDefined();
+      expect(right).toBeDefined();
+      expect(left.biomeType).not.toBe(right.biomeType);
+    }
+  });
 });
