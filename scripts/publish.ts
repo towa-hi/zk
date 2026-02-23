@@ -165,6 +165,16 @@ const importLine = isDefault
   ? `import ${componentName} from './games/${gameSlug}/${fileBase}';`
   : `import { ${componentName} } from './games/${gameSlug}/${fileBase}';`;
 
+const gameComponentProps = gameSlug === 'mine-game'
+  ? `userAddress={userAddress}
+          contractId={contractId}
+          onGameComplete={() => {}}`
+  : `userAddress={userAddress}
+          currentEpoch={1}
+          availablePoints={1000000000n}
+          onStandingsRefresh={() => {}}
+          onGameComplete={() => {}}`;
+
 const appTemplate = `import { config } from './config';
 import { LayoutStandalone } from './components/LayoutStandalone';
 import { useWallet } from './hooks/useWallet';
@@ -208,11 +218,7 @@ export default function App() {
         </div>
       ) : (
         <${componentName}
-          userAddress={userAddress}
-          currentEpoch={1}
-          availablePoints={1000000000n}
-          onStandingsRefresh={() => {}}
-          onGameComplete={() => {}}
+          ${gameComponentProps}
         />
       )}
     </LayoutStandalone>
@@ -220,11 +226,15 @@ export default function App() {
 }
 `;
 
-writeFileSync(path.join(outputDir, 'src', 'App.tsx'), appTemplate);
+if (gameSlug !== 'mine-game') {
+  writeFileSync(path.join(outputDir, 'src', 'App.tsx'), appTemplate);
+}
 
 // Ensure game uses standalone wallet hook
 const walletShim = `export { useWalletStandalone as useWallet } from './useWalletStandalone';\n`;
-writeFileSync(path.join(outputDir, 'src', 'hooks', 'useWallet.ts'), walletShim);
+if (gameSlug !== 'mine-game') {
+  writeFileSync(path.join(outputDir, 'src', 'hooks', 'useWallet.ts'), walletShim);
+}
 
 // Update Vite envDir to local .env
 const vitePath = path.join(outputDir, 'vite.config.ts');
@@ -281,6 +291,18 @@ if (!existsSync(publicDir)) {
   mkdirSync(publicDir, { recursive: true });
 }
 writeFileSync(path.join(publicDir, 'game-studio-config.js'), configText);
+
+// Persist Vite build-time env values into the publish workspace.
+const outputEnvContent = Object.entries(env)
+  .filter(([key, value]) => {
+    if (!value || String(value).trim() === '') return false;
+    return key.startsWith('VITE_') || key === 'GROTH16_VERIFIER_CONTRACT_ID' || key === 'RISC0_VERIFIER_CONTRACT_ID';
+  })
+  .map(([key, value]) => `${key}=${value}`)
+  .join('\n');
+if (outputEnvContent.length > 0) {
+  writeFileSync(path.join(outputDir, '.env'), `${outputEnvContent}\n`);
+}
 
 if (shouldBuild) {
   const nodeModulesPath = path.join(outputDir, 'node_modules');
