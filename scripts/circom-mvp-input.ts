@@ -2,7 +2,7 @@
 
 import { mkdir, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import { createPublicInput, toHex, type WeightProofWitness } from "./risc0-weight-proof-schema";
+import { createPublicInput, toHex, type WeightProofWitness } from "./circom-weight-proof-schema";
 
 function fixedBytes(len: number, byte: number): Uint8Array {
   return new Uint8Array(len).fill(byte);

@@ -11,7 +11,7 @@ import { $ } from "bun";
 import { existsSync } from "node:fs";
 
 console.log("🧪 Running Poseidon v2 vector smoke check...");
-await $`bun run scripts/risc0-weight-proof-vector.ts`;
+await $`bun run scripts/circom-weight-proof-vector.ts`;
 console.log("🧾 Writing Circom MVP input.json...");
 await $`bun run scripts/circom-mvp-input.ts`;
 

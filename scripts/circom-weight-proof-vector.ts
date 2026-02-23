@@ -7,7 +7,7 @@ import {
   createPublicInput,
   toHex,
   type WeightProofWitness,
-} from "./risc0-weight-proof-schema";
+} from "./circom-weight-proof-schema";
 
 function fixedBytes(len: number, byte: number): Uint8Array {
   return new Uint8Array(len).fill(byte);

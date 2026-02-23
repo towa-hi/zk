@@ -12,7 +12,7 @@ import { createMineGameEngineAdapter } from './mineGameEngineAdapter';
 import { createMineGameContractAdapter } from './mineGameContractAdapter';
 import { buildProofPayload } from './engine/proofPayload';
 import { encodeLoadout } from './engine/sharedEncoding';
-import { generateProof } from './services/MineGameRisc0Service';
+import { generateProof } from './services/MineGameCircomService';
 import { computePoseidonCommitment } from './services/circomCommitment';
 
 const createRandomSessionId = (): number => {

@@ -207,7 +207,6 @@ export async function createPublicInput(
   domainTag?: Uint8Array
 ): Promise<WeightProofPublic> {
   assertAllSlotsOccupied(witness.loadoutTiers);
-  const preimage = buildCommitmentPreimage(witness, sessionId, playerAddress, domainTag);
   const commitment = await computeCommitmentPoseidon(witness, sessionId, playerAddress, domainTag);
   return {
     commitment,
