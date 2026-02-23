@@ -46,3 +46,5 @@ CLAUDE.md
 
 # Local external references
 ultrahonk_soroban_contract/
+.tmp-risc0-router/
+rs-soroban-ultrahonk/
