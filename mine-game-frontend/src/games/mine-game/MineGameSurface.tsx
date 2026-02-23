@@ -88,11 +88,18 @@ function toTitleCase(value: string): string {
     .join(' ');
 }
 
-const HAZARD_LABEL: Record<string, string> = {
-  heat: 'Heat',
-  cold: 'Cold',
-  bio: 'Bio',
-  rad: 'Rad',
+const HAZARD_EMOJI: Record<string, string> = {
+  heat: '🔥',
+  cold: '❄️',
+  bio: '🐛',
+  rad: '☢️',
+};
+
+const HAZARD_BADGE: Record<string, { background: string; border: string }> = {
+  heat: { background: 'rgba(254, 226, 226, 0.95)', border: 'rgba(248, 113, 113, 0.55)' },
+  cold: { background: 'rgba(224, 242, 254, 0.95)', border: 'rgba(56, 189, 248, 0.55)' },
+  bio: { background: 'rgba(220, 252, 231, 0.95)', border: 'rgba(74, 222, 128, 0.55)' },
+  rad: { background: 'rgba(243, 232, 255, 0.95)', border: 'rgba(168, 85, 247, 0.55)' },
 };
 
 const BIOME_TEXTURE: Record<string, string> = {
@@ -163,6 +170,28 @@ function computeMovePreview(
     isStartNode,
     isCurrent,
   };
+}
+
+function renderHazardBadge(hazard: string, key?: string) {
+  const style = HAZARD_BADGE[hazard] ?? {
+    background: 'rgba(243, 244, 246, 0.95)',
+    border: 'rgba(107, 114, 128, 0.4)',
+  };
+  const emoji = HAZARD_EMOJI[hazard] ?? hazard;
+  return (
+    <span
+      key={key ?? `${hazard}-badge`}
+      className="inline-flex items-center justify-center rounded px-1 py-[1px] text-[10px] leading-none border"
+      style={{
+        backgroundColor: style.background,
+        borderColor: style.border,
+      }}
+      title={hazard}
+      aria-label={hazard}
+    >
+      {emoji}
+    </span>
+  );
 }
 
 export function MineGameSurface(props: MineGameSurfaceProps) {
@@ -386,8 +415,11 @@ export function MineGameSurface(props: MineGameSurfaceProps) {
                       <p className="text-[11px] opacity-75">
                         Depth {selectedNode.depth} &middot; Intensity {selectedNode.intensity}
                       </p>
-                      <p className="text-[11px] opacity-75">
-                        Hazards: {selectedNode.hazards.map((h) => HAZARD_LABEL[h] ?? h).join(', ')}
+                      <p className="text-[11px] opacity-75 flex items-center gap-1.5">
+                        <span>Hazards:</span>
+                        <span className="inline-flex items-center gap-1">
+                          {selectedNode.hazards.map((h, idx) => renderHazardBadge(h, `${h}-${idx}`))}
+                        </span>
                       </p>
                       {movePreview.isCurrent && (
                         <p className="text-[10px] font-semibold text-purple-700 mt-0.5">You are here</p>
@@ -426,7 +458,10 @@ export function MineGameSurface(props: MineGameSurfaceProps) {
 
                         {!movePreview.isCurrent && movePreview.damageByType.map((d) => (
                           <span key={d.type} className="contents">
-                            <span className="text-red-700/80">Dmg {HAZARD_LABEL[d.type] ?? d.type}</span>
+                            <span className="text-red-700/80 inline-flex items-center gap-1">
+                              <span>Dmg</span>
+                              {renderHazardBadge(d.type, `dmg-${d.type}`)}
+                            </span>
                             <span className="text-right font-semibold text-red-700/80">{d.damage}</span>
                           </span>
                         ))}

@@ -14,6 +14,7 @@ import { buildProofPayload } from './engine/proofPayload';
 import { encodeLoadout } from './engine/sharedEncoding';
 import { generateProof } from './services/MineGameCircomService';
 import { computePoseidonCommitment } from './services/circomCommitment';
+import spaceTexture from './assets/space.jpg';
 
 const createRandomSessionId = (): number => {
   if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
@@ -357,18 +358,43 @@ export function MineGameGame({
   if (screen === 'menu') {
     return (
       <div className="relative h-full w-full bg-white/70 backdrop-blur-xl rounded-none p-0 shadow-xl border-2 border-purple-200 flex items-center justify-center">
-        <div className="rounded-lg border border-green-900/30 bg-white/80 px-6 py-5 text-center">
-          <p className="text-xs tracking-[0.2em] text-green-950 font-semibold">STELLAR EXPLORER</p>
-          <h2 className="mt-2 text-2xl font-black text-green-950">START MENU</h2>
-          <p className="mt-2 text-sm text-green-950/85">Start a new run to enter BUILD phase.</p>
-          <button
-            type="button"
-            className="mt-4 h-[30px] px-4 rounded text-sm bg-purple-700 text-white font-semibold disabled:opacity-60"
-            onClick={startFromMenu}
-            disabled={loading}
+        <div className="!rounded-none relative overflow-hidden min-h-[500px] min-w-[500px] max-h-full max-w-full aspect-square h-full w-full">
+          <div
+            className="h-full w-full flex items-center justify-center px-6"
+            style={{
+              backgroundImage: `url(${spaceTexture})`,
+              backgroundPosition: 'center',
+              backgroundSize: 'cover',
+            }}
           >
-            {loading ? 'Starting...' : 'Start Game'}
-          </button>
+            <div className="w-full max-w-[520px] rounded-xl border border-purple-300/55 bg-white/82 backdrop-blur-sm px-6 py-5 text-left text-slate-900 shadow-lg">
+              <p className="text-xs tracking-[0.2em] text-purple-900 font-semibold">STELLAR EXPLORER</p>
+              <h2 className="mt-2 text-2xl font-black text-slate-900">Mission Briefing</h2>
+              <p className="mt-2 text-sm text-slate-800/90">
+                Tune your probe, head into Planet Alpha, and come back with the best haul you can.
+              </p>
+              <p className="mt-2 text-[13px] leading-snug text-slate-800/85">
+                Every branch is a gamble: deeper paths pay better, but they hit harder.
+                Keep your hull and fuel in check, and know when to bail.
+              </p>
+
+              <div className="mt-4 space-y-2 text-[13px] leading-snug">
+                <p><span className="font-semibold">1) Build:</span> Pick parts, stay under weight 20.</p>
+                <p><span className="font-semibold">2) Explore:</span> Move through biomes, take damage, collect resources.</p>
+                <p><span className="font-semibold">3) Survive:</span> Evacuate to keep more, or ditch the probe and keep a little.</p>
+                <p><span className="font-semibold">4) Prove:</span> Submit your zero-knowledge proof to lock in your run.</p>
+              </div>
+
+              <button
+                type="button"
+                className="mt-5 h-[32px] px-4 rounded text-sm bg-purple-700 text-white font-semibold disabled:opacity-60"
+                onClick={startFromMenu}
+                disabled={loading}
+              >
+                {loading ? 'Launching...' : 'Start Mission'}
+              </button>
+            </div>
+          </div>
         </div>
       </div>
     );

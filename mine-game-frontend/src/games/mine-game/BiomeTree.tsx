@@ -24,10 +24,7 @@ const CENTER = VIEW_SIZE / 2;
 const MAX_DEPTH = 6;
 const OUTER_RADIUS = VIEW_SIZE * 0.46;
 const TREE_RADIUS = VIEW_SIZE * 0.41;
-
-const BASE_RADIUS: Record<number, number> = {
-  0: 10, 1: 7, 2: 6, 3: 5, 4: 4, 5: 3.5, 6: 3,
-};
+const NODE_RADIUS = 5;
 
 const INTENSITY_FILL: Record<1 | 2 | 3, string> = {
   1: '#67e8f9',
@@ -73,37 +70,6 @@ function nodePosition(nodeId: number): { x: number; y: number } {
     x: CENTER + Math.cos(angle) * r,
     y: CENTER + Math.sin(angle) * r,
   };
-}
-
-function treeHopDistance(a: number, b: number): number {
-  if (a === b) return 0;
-
-  const ancestorsA = new Set<number>();
-  let n = a;
-  while (n >= 1) {
-    ancestorsA.add(n);
-    n = Math.floor(n / 2);
-  }
-
-  let cur = b;
-  let distB = 0;
-  while (!ancestorsA.has(cur)) {
-    cur = Math.floor(cur / 2);
-    distB++;
-  }
-
-  const lcaDepth = Math.floor(Math.log2(cur));
-  const aDepth = Math.floor(Math.log2(a));
-  return (aDepth - lcaDepth) + distB;
-}
-
-function falloff(dist: number): { scale: number } {
-  if (dist <= 1) return { scale: 1.15 };
-  if (dist === 2) return { scale: 1.0 };
-  if (dist === 3) return { scale: 0.9 };
-  if (dist === 4) return { scale: 0.8 };
-  if (dist === 5) return { scale: 0.7 };
-  return { scale: 0.6 };
 }
 
 function makeCirclePolygon(cx: number, cy: number, radius: number, segments: number): Point[] {
@@ -197,16 +163,6 @@ export function BiomeTree({
     return m;
   }, [nodes]);
 
-  const distMap = useMemo(() => {
-    const m = new Map<number, number>();
-    if (currentNodeId == null) return m;
-    for (const node of nodes) {
-      m.set(node.id, treeHopDistance(currentNodeId, node.id));
-    }
-    return m;
-  }, [nodes, currentNodeId]);
-
-  const hasFocus = currentNodeId != null;
   const voronoiCells = useMemo(() => {
     const baseCircle = makeCirclePolygon(CENTER, CENTER, OUTER_RADIUS, CIRCLE_SEGMENTS);
     const sites = nodes
@@ -345,8 +301,7 @@ export function BiomeTree({
           const isCurrent = node.id === currentNodeId;
           const isSelected = node.id === selectedNodeId;
           const isHovered = hoveredNode?.id === node.id;
-          const dist = distMap.get(node.id) ?? 0;
-          const baseR = BASE_RADIUS[node.depth] ?? 3;
+          const baseR = NODE_RADIUS;
 
           let r: number;
           let fill: string;
@@ -361,8 +316,7 @@ export function BiomeTree({
             sw = 2.2;
             opacity = 1;
           } else {
-            const f = hasFocus ? falloff(dist) : { scale: 1 };
-            r = baseR * f.scale;
+            r = baseR;
             fill = INTENSITY_FILL[node.intensity];
             stroke = 'rgba(15, 23, 42, 0.4)';
             sw = 0.9;
