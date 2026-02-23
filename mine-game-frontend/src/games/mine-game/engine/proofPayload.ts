@@ -54,6 +54,8 @@ export function buildProofPayload(state: EngineState): ProofPayload {
       salt: state.salt,
     },
     publicInputs: {
+      sessionId: state.sessionId,
+      statementVersion: 2,
       seed: getSeed(state.planetSeed),
       commitment: state.commitment,
       numMoves: state.moveCount,

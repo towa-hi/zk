@@ -237,39 +237,62 @@ Base resources scale with intensity. Double hazard biomes (same type twice) get 
 ## Architecture
 
 ### Transactions per player: 2
-1. Commit probe build hash
-2. Submit ZK proof with public outputs
+1. Commit probe build hash (keccak256 of loadout + salt)
+2. Submit ZK proof with public outputs (RISC0 seal + image ID + journal digest)
 
 ### ZK Stack:
-- Circom circuits → Groth16 proofs → WASM in-browser proving → Soroban on-chain verification
-- Based on Stellar X-Ray upgrade (BN254, Poseidon, Groth16 verifier)
-- Reference: Stellar Private Payments PoC from Nethermind
+- **Proof system**: RISC0 receipts (`seal`, `image_id`, `journal_digest`)
+- **Commitment hash**: keccak256 (frontend `@noble/hashes/sha3`)
+- **On-chain verifier**: RISC0 verifier Soroban contract
 
-### Circuit outputs (public):
-- Full move sequence (path including any backtracking)
-- Per-biome resources extracted
-- Total resources (adjusted for evacuation vs jettison)
-- Final fuel remaining
-- Final hull remaining
-- Outcome (evacuated vs jettisoned)
-- (Stretch: discovery hashes)
+### Contract chain (2 contracts):
+1. **mine-game** — session lifecycle (start, commit, submit_proof, end_game via GameHub)
+2. **RISC0 verifier** — cryptographic proof verification for receipts
+
+### Circuit public inputs (57 field elements):
+- `commitment: [u8; 32]` — 32 fields (one byte per field, keccak256 hash of loadout + salt)
+- `pub_outcome: u32` — 1 field (0 = evacuated, 1 = jettisoned)
+- `pub_total_resources: u32` — 1 field
+- `pub_final_hull: u32` — 1 field
+- `pub_final_fuel: u32` — 1 field
+- `pub_evac_intensity: u32` — 1 field
+- `pub_move_sequence: [u32; 10]` — 10 fields (node visited per move)
+- `pub_resources_per_node: [u32; 10]` — 10 fields
+
+### Circuit private inputs (witness):
+- `loadout: [u8; 10]` — tier per category (never revealed on-chain)
+- `salt: [u8; 64]` — commitment salt (padded, with `salt_len`)
+- `num_moves`, `move_directions`, `move_extracts` — exploration replay data
+- `move_target_hazard1/2`, `move_target_intensity` — per-move node hazard data
+- `evacuated`, `evac_node_intensity` — evacuation context
+
+### What the circuit proves:
+1. Commitment binding: `keccak256(loadout || 0xFF || salt) == commitment`
+2. Loadout validity: all tiers in range, resistance parts max at enhanced, total weight <= 20
+3. Move simulation: direction validation, fuel tracking, hull/damage computation, resource extraction with cargo limits, first-visit tracking
+4. Outcome determination: jettison if hull or fuel reaches 0, evacuation resource penalties
+5. Output integrity: all claimed public outputs match the simulated game state
 
 ### What's secret (ZK-hidden):
 - Probe loadout (which parts were equipped)
+- Salt used for commitment
+- Per-move node data (publicly derivable from planet seed, but not embedded in proof)
 
 ### On-chain state:
 - Planet Alpha seed
-- Prospector commitments
+- Prospector commitments (keccak256 hashes)
 - Verified proof results (ProofOutputs)
+- RISC0 verifier contract address
 - (Stretch: discovery registry, leaderboard, ghost data, path groups)
 
 ---
 
 ## Frontend
 
-- Static site, Tailwind, no backend
-- Circom WASM prover in browser (snarkjs)
-- Stellar SDK for contract calls
+- Static site, React + Tailwind, no backend
+- RISC0 proof payload generation and receipt submission
+- Stellar SDK + Stellar Wallets Kit for contract calls
+- COOP/COEP headers kept available if multithreaded proving is enabled later
 - Dark space theme, neon accents
 - Tree visualization of Planet Alpha's biomes is the main visual — no sprites or illustrations needed
 
@@ -318,7 +341,7 @@ MenuState {
 BUILD → EXPLORE → PROVE → DONE
 ```
 
-- **BUILD**: Player selects parts. Loadout committed as Poseidon hash on-chain.
+- **BUILD**: Player selects parts. Loadout committed as keccak256 hash on-chain.
 - **EXPLORE**: Player navigates tree, takes damage, collects resources. All client-side.
 - **PROVE**: Client generates ZK proof of the full run. Submitted on-chain.
 - **DONE**: Proof verified. Results stored. Player returned to menu.
@@ -351,12 +374,14 @@ Exploration is the mutable core of GameState. All fields under "Mutable during e
 
 ```
 ProofPhase {
-  generating:     boolean         // proof generation in progress
-  proof:          object | null   // snarkjs proof output
-  submitting:     boolean         // tx submission in progress
-  tx_hash:        string | null   // submitted tx hash
-  verified:       boolean         // contract verified the proof
-  error:          string | null   // any error message
+  generating:     boolean             // RISC0 receipt generation in progress
+  seal:           Uint8Array | null   // encoded RISC0 seal
+  image_id:       Uint8Array | null   // RISC0 image ID
+  journal_digest: Uint8Array | null   // SHA-256 digest of the journal
+  submitting:     boolean             // tx submission in progress
+  tx_hash:        string | null       // submitted tx hash
+  verified:       boolean             // contract verified the proof
+  error:          string | null       // any error message
 }
 ```
 
@@ -432,11 +457,11 @@ Evacuate                            // end run, costs 1 fuel. Resources kept bas
 #### Prove Actions
 
 ```
-GenerateProof              // kick off snarkjs WASM proof generation
-                           // auto-triggered on entering PROVE phase
+GenerateProof              // kick off RISC0 receipt generation
+                           // triggered when player clicks submit in PROVE phase
 
-SubmitProof                // submit proof tx on-chain
-                           // available after proof generation completes
+SubmitProof                // submit seal + image_id + journal_digest on-chain via submit_proof
+                           // auto-chained after proof generation completes
 ```
 
 #### Done Actions
@@ -477,7 +502,7 @@ PartCategory: fuel_tank(0),
 
 Tier: standard(0), enhanced(1), advanced(2)
 
-MoveDirection: left(0), right(1), back(2)
+MoveDirection: left(1), right(2), up(3)    // circuit encoding; 0 = no-op/pad
 
 GamePhase: build, explore, prove, done
 
@@ -550,7 +575,7 @@ Planet {
 }
 ```
 
-Generated deterministically: `seed → Poseidon hash chain → biome assignments per node`.
+Generated deterministically: `seed → keccak256 hash chain → biome assignments per node`.
 
 ### Loadout
 
@@ -571,7 +596,7 @@ Loadout {
 
 Validation: `sum of WEIGHT_COST[tier] for all categories <= MAX_WEIGHT`
 
-Commitment: `Poseidon(fuel_tank, resist_heat, ..., cargo_hold, salt)`
+Commitment: `keccak256(encodedLoadout || 0xFF || salt_utf8)` where `encodedLoadout` is the 10-byte tier array
 
 ### Move (single action in sequence)
 
@@ -605,8 +630,8 @@ GameState {
   phase:          GamePhase
   planet:         Planet
   loadout:        Loadout
-  salt:           number          // random, used in commitment hash
-  commitment:     number          // Poseidon hash of loadout + salt
+  salt:           string          // random string, used in commitment hash
+  commitment:     Uint8Array      // keccak256(encodedLoadout || 0xFF || salt_utf8)
 
   // Phase sub-states
   build:          BuildPhase | null
@@ -632,24 +657,38 @@ GameState {
 }
 ```
 
-### ProofInputs (what gets fed to the circuit)
+### ProofInputs (what gets fed into RISC0 proof generation)
 
 ```
 ProofInputs {
-  // Private
-  loadout:    number[10]    // tier per category
-  salt:       number
+  // Private (witness — never included in proof blob)
+  loadout:              u8[10]      // tier per category (0/1/2)
+  salt:                 u8[64]      // UTF-8 encoded salt, zero-padded to 64 bytes
+  salt_len:             u32         // actual byte length of salt
+  num_moves:            u32         // actual moves taken (rest are padded)
+  move_directions:      u8[10]      // 1=left, 2=right, 3=up, 0=pad
+  move_extracts:        u8[10]      // 0 or 1 per move
+  move_target_hazard1:  u8[10]      // hazard type index (0-3) for each move's target node
+  move_target_hazard2:  u8[10]      // second hazard type index
+  move_target_intensity: u8[10]     // node intensity (1-3) per move
+  evacuated:            u8          // 1 if player evacuated, 0 if jettisoned
+  evac_node_intensity:  u8          // intensity at evacuation node
 
-  // Public
-  seed:       number        // planet seed
-  commitment: number        // hash of loadout + salt
-  num_moves:  number        // actual moves taken (rest are padded no-ops)
-  moves:      number[10][2] // [direction, extract] per move (padded to MAX_MOVES)
-                            // no-op padding: [0, 0] for unused slots
-  evacuated:  boolean       // did the player evacuate?
-  biomes:     number[127]   // full tree biome types (contract verifies independently)
+  // Public (embedded in proof blob as 32-byte field elements)
+  commitment:           u8[32]      // keccak256(loadout || 0xFF || salt) — 32 fields
+  pub_outcome:          u32         // 0 = evacuated, 1 = jettisoned
+  pub_total_resources:  u32         // final score after outcome multiplier
+  pub_final_hull:       u32
+  pub_final_fuel:       u32
+  pub_evac_intensity:   u32         // intensity of evacuation node (0 if jettisoned)
+  pub_move_sequence:    u32[10]     // node ID visited per move (0 = pad)
+  pub_resources_per_node: u32[10]   // resources gained per move
 }
 ```
+
+The circuit validates all state transitions internally and asserts public outputs match.
+Planet node data is passed as private inputs; on-chain verification of planet data
+against the seed is handled separately by the contract.
 
 ### ProofOutputs (public outputs from circuit)
 
@@ -668,9 +707,18 @@ ProofOutputs {
 ### OnChainState (Soroban contract storage)
 
 ```
-OnChainState {
-  planet_seed:    number
-  commitments:    Map<address, number>      // player → loadout hash
-  results:        Map<address, ProofOutputs> // player → verified results
+// mine-game contract
+MineGameState {
+  admin:              Address
+  game_hub_address:   Address
+  verifier_address:   Address                          // RISC0 verifier contract
+  planet_seed:        number                           // current planet seed
+  commitments:        Map<(session_id, address), Bytes> // keccak256 commitment
+  results:            Map<(session_id, address), ProofOutputs>
+  sessions:           Map<session_id, SessionData>
 }
+
+// Verification flow:
+// mine-game.submit_proof(session_id, player, proof_payload, commitment, outputs)
+//   → ultrahonk_verifier.verify_proof(public_inputs, proof_bytes)
 ```

@@ -11,13 +11,19 @@
     "publish": "bun run scripts/publish.ts",
     "dev": "bun --cwd=sgs_frontend run dev",
     "dev:game": "bun run scripts/dev-game.ts",
-    "console:mine": "bun run scripts/mine-console.ts"
+    "console:mine": "bun run scripts/mine-console.ts",
+    "circuit": "bun run scripts/build-circuit.ts",
+    "circuit:mvp:input": "bun run scripts/circom-mvp-input.ts",
+    "circuit:mvp:prove": "node scripts/circom-mvp-prove.mjs"
   },
   "devDependencies": {
     "@types/bun": "latest"
   },
   "dependencies": {
     "@noble/hashes": "^2.0.1",
-    "@stellar/stellar-sdk": "^14.5.0"
+    "@stellar/stellar-sdk": "^14.5.0",
+    "circomlib": "^2.0.5",
+    "circomlibjs": "^0.1.7",
+    "snarkjs": "^0.7.5"
   }
 }

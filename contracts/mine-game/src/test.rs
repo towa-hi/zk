@@ -1,8 +1,29 @@
 #![cfg(test)]
 
 use crate::{Error, MineGameContract, MineGameContractClient, ProofOutputs};
+
 use soroban_sdk::testutils::{Address as _, Ledger as _};
-use soroban_sdk::{Bytes, BytesN, Env, contract, contractimpl, contracttype, vec, Address};
+use soroban_sdk::{Bytes, BytesN, Env, Vec, contract, contractimpl, contracttype, vec, Address};
+
+fn sample_proof_payload(env: &Env) -> Bytes {
+    Bytes::from_array(env, &[0xee; 64])
+}
+
+fn sample_public_inputs(env: &Env, commitment: &Bytes) -> Vec<BytesN<32>> {
+    let mut inputs = Vec::new(env);
+    inputs.push_back(BytesN::from_array(env, &[0x11; 32])); // session_id
+    inputs.push_back(BytesN::from_array(env, &[0x22; 32])); // statement_version
+    inputs.push_back(BytesN::from_array(env, &[0x33; 32])); // all_slots_occupied
+    let commitment_32 = BytesN::from_array(env, &{
+        let mut arr = [0u8; 32];
+        for i in 0..32u32 {
+            arr[i as usize] = commitment.get(i).unwrap_or(0);
+        }
+        arr
+    });
+    inputs.push_back(commitment_32);
+    inputs
+}
 
 
 #[contract]
@@ -64,44 +85,31 @@ impl MockGameHub {
 }
 
 #[contract]
-pub struct MockVerifier;
+pub struct MockGroth16Verifier;
 
 #[contracttype]
 #[derive(Clone)]
-enum VerifierDataKey {
-    ShouldVerify,
-    Mode,
+enum Groth16DataKey {
+    ShouldFail,
 }
 
 #[contractimpl]
-impl MockVerifier {
-    pub fn set_should_verify(env: Env, should_verify: bool) {
+impl MockGroth16Verifier {
+    pub fn set_should_fail(env: Env, should_fail: bool) {
         env.storage()
             .instance()
-            .set(&VerifierDataKey::ShouldVerify, &should_verify);
+            .set(&Groth16DataKey::ShouldFail, &should_fail);
     }
 
-    pub fn verify(
-        env: Env,
-        _session_id: u32,
-        _player: Address,
-        _vk_json: Bytes,
-        _proof_blob: Bytes,
-        _commitment: Bytes,
-        _outputs: ProofOutputs,
-    ) -> bool {
-        let mode: u32 = env.storage().instance().get(&VerifierDataKey::Mode).unwrap_or(0);
-        if mode == 1 {
-            return false;
+    pub fn verify(env: Env, _proof_payload: Bytes, _public_inputs: Vec<BytesN<32>>) {
+        let should_fail: bool = env
+            .storage()
+            .instance()
+            .get(&Groth16DataKey::ShouldFail)
+            .unwrap_or(false);
+        if should_fail {
+            panic!("verification failed");
         }
-        env.storage()
-            .instance()
-            .get(&VerifierDataKey::ShouldVerify)
-            .unwrap_or(true)
-    }
-
-    pub fn set_mode(env: Env, mode: u32) {
-        env.storage().instance().set(&VerifierDataKey::Mode, &mode);
     }
 }
 
@@ -109,7 +117,7 @@ fn setup_test() -> (
     Env,
     MineGameContractClient<'static>,
     MockGameHubClient<'static>,
-    MockVerifierClient<'static>,
+    MockGroth16VerifierClient<'static>,
     Address,
     Address,
 ) {
@@ -128,8 +136,8 @@ fn setup_test() -> (
 
     let hub_addr = env.register(MockGameHub, ());
     let game_hub = MockGameHubClient::new(&env, &hub_addr);
-    let verifier_addr = env.register(MockVerifier, ());
-    let verifier = MockVerifierClient::new(&env, &verifier_addr);
+    let verifier_addr = env.register(MockGroth16Verifier, ());
+    let verifier = MockGroth16VerifierClient::new(&env, &verifier_addr);
     let admin = Address::generate(&env);
     let contract_id = env.register(MineGameContract, (&admin, &hub_addr, &verifier_addr));
     game_hub.add_game(&contract_id);
@@ -219,18 +227,18 @@ fn test_commit_then_submit_proof_happy_path() {
     let (env, client, hub, _verifier, _admin, player) = setup_test();
     let session_id = 2u32;
     let points = 250_0000000i128;
-    let commitment = Bytes::from_array(&env, &[1, 2, 3, 4]);
-    let proof = Bytes::from_array(&env, &[9, 8, 7]);
+    let commitment = Bytes::from_array(&env, &[1u8; 32]);
     let outputs = sample_outputs(&env, 0, 3);
 
     client.start_game(&session_id, &player, &player, &points, &0i128);
     client.commit_loadout(&session_id, &player, &commitment);
-    let vk = Bytes::from_array(&env, &[1, 2]);
+    let proof_payload = sample_proof_payload(&env);
+    let public_inputs = sample_public_inputs(&env, &commitment);
     client.submit_proof(
         &session_id,
         &player,
-        &vk,
-        &proof,
+        &proof_payload,
+        &public_inputs,
         &commitment,
         &outputs,
     );
@@ -257,11 +265,13 @@ fn test_submit_proof_without_commitment_rejected() {
     let points = 100_0000000i128;
     client.start_game(&session_id, &player, &player, &points, &0i128);
 
+    let proof_payload = sample_proof_payload(&env);
+    let public_inputs = sample_public_inputs(&env, &Bytes::from_array(&env, &[1u8; 32]));
     let result = client.try_submit_proof(
         &session_id,
         &player,
-        &Bytes::from_array(&env, &[1]),
-        &Bytes::from_array(&env, &[7]),
+        &proof_payload,
+        &public_inputs,
         &Bytes::from_array(&env, &[1]),
         &sample_outputs(&env, 0, 2),
     );
@@ -284,18 +294,18 @@ fn test_duplicate_commitment_rejected() {
 fn test_duplicate_proof_submission_rejected() {
     let (env, client, _hub, _verifier, _admin, player) = setup_test();
     let session_id = 5u32;
-    let commitment = Bytes::from_array(&env, &[6, 6, 6]);
-    let proof = Bytes::from_array(&env, &[1, 2, 3]);
+    let commitment = Bytes::from_array(&env, &[6u8; 32]);
     let outputs = sample_outputs(&env, 0, 1);
 
     client.start_game(&session_id, &player, &player, &100_0000000, &0i128);
     client.commit_loadout(&session_id, &player, &commitment);
-    let vk = Bytes::from_array(&env, &[1, 2]);
+    let proof_payload = sample_proof_payload(&env);
+    let public_inputs = sample_public_inputs(&env, &commitment);
     client.submit_proof(
         &session_id,
         &player,
-        &vk,
-        &proof,
+        &proof_payload,
+        &public_inputs,
         &commitment,
         &outputs,
     );
@@ -303,8 +313,8 @@ fn test_duplicate_proof_submission_rejected() {
     let result = client.try_submit_proof(
         &session_id,
         &player,
-        &vk,
-        &proof,
+        &proof_payload,
+        &public_inputs,
         &commitment,
         &outputs,
     );
@@ -314,30 +324,34 @@ fn test_duplicate_proof_submission_rejected() {
 #[test]
 fn test_verifier_failure_rejected_and_hub_not_ended() {
     let (env, client, hub, verifier, _admin, player) = setup_test();
-    verifier.set_should_verify(&false);
+    verifier.set_should_fail(&true);
 
     let session_id = 6u32;
-    let commitment = Bytes::from_array(&env, &[44, 55]);
+    let commitment = Bytes::from_array(&env, &[44u8; 32]);
+    let outputs = sample_outputs(&env, 1, 0);
     client.start_game(&session_id, &player, &player, &100_0000000, &0i128);
     client.commit_loadout(&session_id, &player, &commitment);
 
+    let proof_payload = sample_proof_payload(&env);
+    let public_inputs = sample_public_inputs(&env, &commitment);
     let result = client.try_submit_proof(
         &session_id,
         &player,
-        &Bytes::from_array(&env, &[1]),
-        &Bytes::from_array(&env, &[9, 9]),
+        &proof_payload,
+        &public_inputs,
         &commitment,
-        &sample_outputs(&env, 1, 0),
+        &outputs,
     );
     assert_contract_error(&result, Error::InvalidProof);
     assert_eq!(hub.get_end_count(), 0);
 }
 
 #[test]
-fn test_invalid_public_outputs_rejected() {
+fn test_public_outputs_not_bound_to_proof_blob() {
     let (env, client, _hub, _verifier, _admin, player) = setup_test();
     let session_id = 7u32;
-    let commitment = Bytes::from_array(&env, &[9, 0]);
+    let commitment = Bytes::from_array(&env, &[9u8; 32]);
+    let _actual_outputs = sample_outputs(&env, 0, 2);
     client.start_game(&session_id, &player, &player, &100_0000000, &0i128);
     client.commit_loadout(&session_id, &player, &commitment);
 
@@ -350,11 +364,13 @@ fn test_invalid_public_outputs_rejected() {
         outcome: 0,
         evac_intensity: 0,
     };
+    let proof_payload = sample_proof_payload(&env);
+    let public_inputs = sample_public_inputs(&env, &commitment);
     let result = client.try_submit_proof(
         &session_id,
         &player,
-        &Bytes::from_array(&env, &[1]),
-        &Bytes::from_array(&env, &[2]),
+        &proof_payload,
+        &public_inputs,
         &commitment,
         &bad_outputs,
     );
@@ -368,7 +384,7 @@ fn test_upgrade_function_exists() {
 
     let admin = Address::generate(&env);
     let hub_addr = env.register(MockGameHub, ());
-    let verifier_addr = env.register(MockVerifier, ());
+    let verifier_addr = env.register(MockGroth16Verifier, ());
     let contract_id = env.register(MineGameContract, (&admin, &hub_addr, &verifier_addr));
     let client = MineGameContractClient::new(&env, &contract_id);
     let new_wasm_hash = BytesN::from_array(&env, &[1u8; 32]);
@@ -391,20 +407,24 @@ fn sample_outputs(env: &Env, outcome: u32, evac_intensity: u32) -> ProofOutputs 
 #[test]
 fn test_submit_proof_rejects_when_verifier_mode_rejects() {
     let (env, client, _hub, verifier, _admin, player) = setup_test();
-    verifier.set_mode(&1);
+    verifier.set_should_fail(&true);
 
     let session_id = 8u32;
-    let commitment = Bytes::from_array(&env, &[7, 7, 7, 7]);
+    let commitment = Bytes::from_array(&env, &[7u8; 32]);
+    let outputs = sample_outputs(&env, 0, 2);
     client.start_game(&session_id, &player, &player, &100_0000000, &0i128);
     client.commit_loadout(&session_id, &player, &commitment);
 
+    let proof_payload = sample_proof_payload(&env);
+    let public_inputs = sample_public_inputs(&env, &commitment);
     let result = client.try_submit_proof(
         &session_id,
         &player,
-        &Bytes::from_array(&env, &[1]),
-        &Bytes::from_array(&env, &[1, 2, 3]),
+        &proof_payload,
+        &public_inputs,
         &commitment,
-        &sample_outputs(&env, 0, 2),
+        &outputs,
     );
     assert_contract_error(&result, Error::InvalidProof);
 }
+

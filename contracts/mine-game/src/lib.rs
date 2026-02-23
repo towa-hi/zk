@@ -29,17 +29,9 @@ pub trait GameHub {
     fn end_game(env: Env, session_id: u32, player1_won: bool);
 }
 
-#[contractclient(name = "VerifierClient")]
-pub trait Verifier {
-    fn verify(
-        env: Env,
-        session_id: u32,
-        player: Address,
-        vk_json: Bytes,
-        proof_blob: Bytes,
-        commitment: Bytes,
-        outputs: ProofOutputs,
-    ) -> bool;
+#[contractclient(name = "Groth16VerifierClient")]
+pub trait Groth16Verifier {
+    fn verify(env: Env, proof_payload: Bytes, public_inputs: Vec<BytesN<32>>);
 }
 
 // ============================================================================
@@ -257,8 +249,8 @@ impl MineGameContract {
         env: Env,
         session_id: u32,
         player: Address,
-        vk_json: Bytes,
-        proof_blob: Bytes,
+        proof_payload: Bytes,
+        public_inputs: Vec<BytesN<32>>,
         submitted_commitment: Bytes,
         public_outputs: ProofOutputs,
     ) -> Result<(), Error> {
@@ -271,12 +263,16 @@ impl MineGameContract {
         }
 
         let commitment_key = DataKey::Commitment(session_id, player.clone());
-        let stored_commitment: Bytes = env
-            .storage()
-            .temporary()
-            .get(&commitment_key)
-            .ok_or(Error::MissingCommitment)?;
+        let stored_commitment: Bytes = env.storage().temporary().get(&commitment_key).ok_or(Error::MissingCommitment)?;
         if stored_commitment != submitted_commitment {
+            return Err(Error::CommitmentMismatch);
+        }
+        let submitted_commitment_32 = bytes_to_bytesn32(&env, &submitted_commitment).ok_or(Error::CommitmentMismatch)?;
+        if public_inputs.len() < 4 {
+            return Err(Error::InvalidProof);
+        }
+        let proof_commitment = public_inputs.get(3).ok_or(Error::InvalidProof)?;
+        if proof_commitment != submitted_commitment_32 {
             return Err(Error::CommitmentMismatch);
         }
 
@@ -290,16 +286,11 @@ impl MineGameContract {
             .instance()
             .get(&DataKey::VerifierAddress)
             .ok_or(Error::VerifierNotSet)?;
-        let verifier = VerifierClient::new(&env, &verifier_addr);
-        let proof_ok = verifier.verify(
-            &session_id,
-            &player,
-            &vk_json,
-            &proof_blob,
-            &submitted_commitment,
-            &public_outputs,
-        );
-        if !proof_ok {
+        let groth16 = Groth16VerifierClient::new(&env, &verifier_addr);
+        if groth16
+            .try_verify(&proof_payload, &public_inputs)
+            .is_err()
+        {
             return Err(Error::InvalidProof);
         }
 
@@ -470,10 +461,40 @@ fn require_admin(env: &Env) {
     admin.require_auth();
 }
 
+fn validate_outputs(outputs: &ProofOutputs) -> Result<(), Error> {
+    if outputs.move_sequence.len() > 10 || outputs.resources_per_node.len() > 10 {
+        return Err(Error::InvalidPublicOutputs);
+    }
+    if outputs.move_sequence.len() != outputs.resources_per_node.len() {
+        return Err(Error::InvalidPublicOutputs);
+    }
+    if outputs.outcome > 1 {
+        return Err(Error::InvalidOutcome);
+    }
+    if outputs.outcome == 1 && outputs.evac_intensity != 0 {
+        return Err(Error::InvalidEvacIntensity);
+    }
+    if outputs.outcome == 0 && (outputs.evac_intensity == 0 || outputs.evac_intensity > 3) {
+        return Err(Error::InvalidEvacIntensity);
+    }
+    Ok(())
+}
+
 fn extend_temp_ttl(env: &Env, key: &DataKey) {
     env.storage()
         .temporary()
         .extend_ttl(key, GAME_TTL_LEDGERS, GAME_TTL_LEDGERS);
+}
+
+fn bytes_to_bytesn32(env: &Env, bytes: &Bytes) -> Option<BytesN<32>> {
+    if bytes.len() != 32 {
+        return None;
+    }
+    let mut out = [0u8; 32];
+    for i in 0..32u32 {
+        out[i as usize] = bytes.get(i).unwrap_or(0);
+    }
+    Some(BytesN::from_array(env, &out))
 }
 
 fn reset_player_session_state(env: &Env, session_id: u32, player: &Address) {
@@ -496,25 +517,6 @@ fn reset_player_session_state(env: &Env, session_id: u32, player: &Address) {
     if active_session == Some(session_id) {
         env.storage().temporary().remove(&active_session_key);
     }
-}
-
-fn validate_outputs(outputs: &ProofOutputs) -> Result<(), Error> {
-    if outputs.move_sequence.len() > 10 || outputs.resources_per_node.len() > 10 {
-        return Err(Error::InvalidPublicOutputs);
-    }
-    if outputs.move_sequence.len() != outputs.resources_per_node.len() {
-        return Err(Error::InvalidPublicOutputs);
-    }
-    if outputs.outcome > 1 {
-        return Err(Error::InvalidOutcome);
-    }
-    if outputs.outcome == 1 && outputs.evac_intensity != 0 {
-        return Err(Error::InvalidEvacIntensity);
-    }
-    if outputs.outcome == 0 && (outputs.evac_intensity == 0 || outputs.evac_intensity > 3) {
-        return Err(Error::InvalidEvacIntensity);
-    }
-    Ok(())
 }
 
 // ============================================================================

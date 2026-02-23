@@ -144,6 +144,8 @@ export interface ProofPayload {
     salt: string;
   };
   publicInputs: {
+    sessionId: number;
+    statementVersion: number;
     seed: string;
     commitment: string;
     numMoves: number;
@@ -160,9 +162,9 @@ export interface ProofPayload {
     outcome: 0 | 1;
     evacIntensity: number;
   };
-  noir?: {
-    proofBlob: Uint8Array;
-    vkBytes: Uint8Array;
+  circom?: {
+    proof: string[];
+    publicSignals: string[];
   };
 }
 

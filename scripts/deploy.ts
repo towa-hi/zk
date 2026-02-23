@@ -56,6 +56,7 @@ Examples:
 
 console.log("🚀 Deploying contracts to Stellar testnet...\n");
 const Keypair = await loadKeypairFactory();
+const DEFAULT_DEPLOY_PACKAGES = new Set(["mock-game-hub", "mine-game"]);
 
 const NETWORK = 'testnet';
 const RPC_URL = 'https://soroban-testnet.stellar.org';
@@ -123,7 +124,9 @@ if (selection.unknown.length > 0 || selection.ambiguous.length > 0) {
   process.exit(1);
 }
 
-const contracts = selection.contracts;
+const contracts = args.length === 0
+  ? allContracts.filter((c) => DEFAULT_DEPLOY_PACKAGES.has(c.packageName))
+  : selection.contracts;
 const mock = allContracts.find((c) => c.isMockHub);
 if (!mock) {
   console.error("❌ Error: mock-game-hub contract not found in workspace members");
@@ -161,22 +164,25 @@ let existingSecrets: Record<string, string | null> = {
 };
 
 const existingEnv = await readEnvFile('.env');
+const existingAdminSecret =
+  getEnvValue(existingEnv, 'VITE_DEV_ADMIN_SECRET') ||
+  getEnvValue(existingEnv, 'ADMIN_SECRET');
 for (const identity of ['player1', 'player2']) {
   const key = `VITE_DEV_${identity.toUpperCase()}_SECRET`;
   const v = getEnvValue(existingEnv, key);
   if (v && v !== 'NOT_AVAILABLE') existingSecrets[identity] = v;
 }
 
-const configuredMineGameVerifierId =
-  process.env.MINE_GAME_VERIFIER_CONTRACT_ID ||
-  process.env.VITE_MINE_GAME_VERIFIER_CONTRACT_ID ||
-  getEnvValue(existingEnv, "MINE_GAME_VERIFIER_CONTRACT_ID") ||
-  getEnvValue(existingEnv, "VITE_MINE_GAME_VERIFIER_CONTRACT_ID");
-const configuredUltraHonkVerifierId =
-  process.env.ULTRAHONK_VERIFIER_CONTRACT_ID ||
-  process.env.VITE_ULTRAHONK_VERIFIER_CONTRACT_ID ||
-  getEnvValue(existingEnv, "ULTRAHONK_VERIFIER_CONTRACT_ID") ||
-  getEnvValue(existingEnv, "VITE_ULTRAHONK_VERIFIER_CONTRACT_ID");
+const configuredGroth16VerifierId =
+  process.env.GROTH16_VERIFIER_CONTRACT_ID ||
+  process.env.VITE_GROTH16_VERIFIER_CONTRACT_ID ||
+  process.env.RISC0_VERIFIER_CONTRACT_ID ||
+  process.env.VITE_RISC0_VERIFIER_CONTRACT_ID ||
+  getEnvValue(existingEnv, "GROTH16_VERIFIER_CONTRACT_ID") ||
+  getEnvValue(existingEnv, "VITE_GROTH16_VERIFIER_CONTRACT_ID") ||
+  getEnvValue(existingEnv, "RISC0_VERIFIER_CONTRACT_ID") ||
+  getEnvValue(existingEnv, "VITE_RISC0_VERIFIER_CONTRACT_ID") ||
+  "";
 
 // Load existing deployment info so partial deploys can preserve other IDs.
 const existingContractIds: Record<string, string> = {};
@@ -186,11 +192,9 @@ if (existsSync("deployment.json")) {
     existingDeployment = await Bun.file("deployment.json").json();
     if (existingDeployment?.contracts && typeof existingDeployment.contracts === "object") {
       Object.assign(existingContractIds, existingDeployment.contracts);
-    } else {
-      // Backwards compatible fallback
-      if (existingDeployment?.mockGameHubId) existingContractIds["mock-game-hub"] = existingDeployment.mockGameHubId;
-      if (existingDeployment?.twentyOneId) existingContractIds["twenty-one"] = existingDeployment.twentyOneId;
-      if (existingDeployment?.numberGuessId) existingContractIds["number-guess"] = existingDeployment.numberGuessId;
+    } else if (existingDeployment?.mockGameHubId) {
+      // Backwards compatibility fallback for older deployment files.
+      existingContractIds["mock-game-hub"] = existingDeployment.mockGameHubId;
     }
   } catch (error) {
     console.warn("⚠️  Warning: Failed to parse deployment.json, continuing...");
@@ -203,17 +207,28 @@ for (const contract of allContracts) {
   if (envId) existingContractIds[contract.packageName] = envId;
 }
 
-let mineGameVerifierId = configuredMineGameVerifierId || existingContractIds["mine-game-verifier"] || "";
-if (deployingMineGame && !mineGameVerifierId && !contracts.some((c) => c.packageName === "mine-game-verifier")) {
-  console.error("❌ Error: mine-game deployment requires a verifier contract ID.");
-  console.error("Set MINE_GAME_VERIFIER_CONTRACT_ID (or VITE_MINE_GAME_VERIFIER_CONTRACT_ID), or deploy mine-game-verifier in the same run.");
+const resolvedGroth16VerifierId =
+  configuredGroth16VerifierId ||
+  existingContractIds["risc0-router"] ||
+  existingDeployment?.contracts?.["risc0-router"] ||
+  "";
+
+if (deployingMineGame && !resolvedGroth16VerifierId) {
+  console.error("❌ Error: mine-game deployment requires GROTH16_VERIFIER_CONTRACT_ID.");
+  console.error("Set GROTH16_VERIFIER_CONTRACT_ID (or VITE_GROTH16_VERIFIER_CONTRACT_ID).");
   process.exit(1);
 }
 
 // Handle admin identity (needs to be in Stellar CLI for deployment)
 console.log('Setting up admin identity...');
-console.log('📝 Generating new admin identity...');
-const adminKeypair = Keypair.random();
+let adminKeypair: StellarKeypair;
+if (existingAdminSecret && existingAdminSecret !== 'NOT_AVAILABLE') {
+  console.log('✅ Using existing admin from .env');
+  adminKeypair = Keypair.fromSecret(existingAdminSecret);
+} else {
+  console.log('📝 Generating new admin identity...');
+  adminKeypair = Keypair.random();
+}
 
 walletAddresses.admin = adminKeypair.publicKey();
 
@@ -262,6 +277,7 @@ console.log(`  Player2: ${walletAddresses.player2}\n`);
 // Use admin secret for contract deployment
 const adminAddress = walletAddresses.admin;
 const adminSecret = adminKeypair.secret();
+walletSecrets.admin = adminSecret;
 
 const deployed: Record<string, string> = { ...existingContractIds };
 
@@ -307,11 +323,7 @@ if (shouldEnsureMock) {
   }
 }
 
-const deploymentOrder = [...contracts].sort((a, b) => {
-  if (a.packageName === "mine-game-verifier" && b.packageName === "mine-game") return -1;
-  if (a.packageName === "mine-game" && b.packageName === "mine-game-verifier") return 1;
-  return 0;
-});
+const deploymentOrder = [...contracts];
 
 for (const contract of deploymentOrder) {
   if (contract.isMockHub) continue;
@@ -319,43 +331,50 @@ for (const contract of deploymentOrder) {
   console.log(`Deploying ${contract.packageName}...`);
   try {
     console.log("  Installing WASM...");
-    const installResult =
-      await $`stellar contract install --wasm ${contract.wasmPath} --source-account ${adminSecret} --network ${NETWORK}`.text();
-    const wasmHash = installResult.trim();
+    let installResult = "";
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        installResult = (await $`stellar contract install --wasm ${contract.wasmPath} --source-account ${adminSecret} --network ${NETWORK}`.text()).trim();
+        break;
+      } catch (e: any) {
+        const msg = String(e?.message ?? e ?? "");
+        if (attempt < 3 && (msg.includes("Account not found") || msg.includes("Contract Code not found"))) {
+          console.log(`  Retry ${attempt}/3 in 3s (RPC propagation)...`);
+          await new Promise((r) => setTimeout(r, 3000));
+        } else {
+          throw e;
+        }
+      }
+    }
+    const wasmHash = installResult;
     console.log(`  WASM hash: ${wasmHash}`);
+    // Testnet RPC can lag briefly before newly uploaded code is discoverable.
+    await new Promise((r) => setTimeout(r, 3000));
 
     console.log("  Deploying and initializing...");
-    const deployResult = contract.packageName === "mine-game"
-      ? await $`stellar contract deploy --wasm-hash ${wasmHash} --source-account ${adminSecret} --network ${NETWORK} -- --admin ${adminAddress} --game-hub ${mockGameHubId} --verifier ${mineGameVerifierId}`.text()
-      : await $`stellar contract deploy --wasm-hash ${wasmHash} --source-account ${adminSecret} --network ${NETWORK} -- --admin ${adminAddress} --game-hub ${mockGameHubId}`.text();
+    let deployResult = "";
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        deployResult = contract.packageName === "mine-game"
+          ? await $`stellar contract deploy --wasm-hash ${wasmHash} --source-account ${adminSecret} --network ${NETWORK} -- --admin ${adminAddress} --game-hub ${mockGameHubId} --verifier ${resolvedGroth16VerifierId}`.text()
+          : await $`stellar contract deploy --wasm-hash ${wasmHash} --source-account ${adminSecret} --network ${NETWORK} -- --admin ${adminAddress} --game-hub ${mockGameHubId}`.text();
+        break;
+      } catch (e: any) {
+        const msg = String(e?.message ?? e ?? "");
+        if (attempt < 3 && (msg.includes("Account not found") || msg.includes("Contract Code not found"))) {
+          console.log(`  Retry ${attempt}/3 in 3s (RPC propagation)...`);
+          await new Promise((r) => setTimeout(r, 3000));
+        } else {
+          throw e;
+        }
+      }
+    }
     const contractId = deployResult.trim();
     deployed[contract.packageName] = contractId;
-    if (contract.packageName === "mine-game-verifier") {
-      mineGameVerifierId = contractId;
-    }
     console.log(`✅ ${contract.packageName} deployed: ${contractId}\n`);
   } catch (error) {
     console.error(`❌ Failed to deploy ${contract.packageName}:`, error);
     process.exit(1);
-  }
-}
-
-const mineGameVerifierContractId = deployed["mine-game-verifier"] || mineGameVerifierId || "";
-if (mineGameVerifierContractId && configuredUltraHonkVerifierId) {
-  console.log(`Configuring mine-game-verifier UltraHonk address: ${configuredUltraHonkVerifierId}`);
-  try {
-    await $`stellar contract invoke --id ${mineGameVerifierContractId} --source-account ${adminSecret} --network ${NETWORK} -- set_ultrahonk_address --address ${configuredUltraHonkVerifierId}`.text();
-    console.log("✅ mine-game-verifier UltraHonk address set");
-  } catch (error) {
-    console.error("❌ Failed to set mine-game-verifier UltraHonk address:", error);
-    process.exit(1);
-  }
-
-  try {
-    const ultrahonkAddr = await $`stellar contract invoke --id ${mineGameVerifierContractId} --source-account ${adminSecret} --network ${NETWORK} -- get_ultrahonk_address`.text();
-    console.log(`mine-game-verifier get_ultrahonk_address: ${ultrahonkAddr.trim()}`);
-  } catch (error) {
-    console.warn("⚠️  Could not run mine-game-verifier post-deploy checks.");
   }
 }
 
@@ -370,9 +389,6 @@ for (const contract of allContracts) {
   if (id) console.log(`  ${contract.packageName}: ${id}`);
 }
 
-const twentyOneId = deployed["twenty-one"] || "";
-const numberGuessId = deployed["number-guess"] || "";
-
 const deploymentContracts = allContracts.reduce<Record<string, string>>((acc, contract) => {
   acc[contract.packageName] = deployed[contract.packageName] || "";
   return acc;
@@ -380,8 +396,6 @@ const deploymentContracts = allContracts.reduce<Record<string, string>>((acc, co
 
 const deploymentInfo = {
   mockGameHubId,
-  twentyOneId,
-  numberGuessId,
   contracts: deploymentContracts,
   network: NETWORK,
   rpcUrl: RPC_URL,
@@ -400,6 +414,9 @@ console.log("\n✅ Wrote deployment info to deployment.json");
 const contractEnvLines = allContracts
   .map((c) => `VITE_${c.envKey}_CONTRACT_ID=${deploymentContracts[c.packageName] || ""}`)
   .join("\n");
+const groth16EnvLines = resolvedGroth16VerifierId
+  ? `GROTH16_VERIFIER_CONTRACT_ID=${resolvedGroth16VerifierId}\nVITE_GROTH16_VERIFIER_CONTRACT_ID=${resolvedGroth16VerifierId}\nRISC0_VERIFIER_CONTRACT_ID=${resolvedGroth16VerifierId}\nVITE_RISC0_VERIFIER_CONTRACT_ID=${resolvedGroth16VerifierId}`
+  : "";
 
 const envContent = `# Auto-generated by deploy script
 # Do not edit manually - run 'bun run deploy' (or 'bun run setup') to regenerate
@@ -408,6 +425,7 @@ const envContent = `# Auto-generated by deploy script
 VITE_SOROBAN_RPC_URL=${RPC_URL}
 VITE_NETWORK_PASSPHRASE=${NETWORK_PASSPHRASE}
 ${contractEnvLines}
+${groth16EnvLines}
 
 # Dev wallet addresses for testing
 VITE_DEV_ADMIN_ADDRESS=${walletAddresses.admin}
@@ -415,6 +433,7 @@ VITE_DEV_PLAYER1_ADDRESS=${walletAddresses.player1}
 VITE_DEV_PLAYER2_ADDRESS=${walletAddresses.player2}
 
 # Dev wallet secret keys (WARNING: Never commit this file!)
+VITE_DEV_ADMIN_SECRET=${walletSecrets.admin}
 VITE_DEV_PLAYER1_SECRET=${walletSecrets.player1}
 VITE_DEV_PLAYER2_SECRET=${walletSecrets.player2}
 `;

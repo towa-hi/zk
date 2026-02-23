@@ -6,7 +6,6 @@ members = [
   "contracts/twenty-one",
   "contracts/number-guess",
   "contracts/dice-duel",
-  "contracts/mine-game-verifier",
   "contracts/risc0-dev-verifier",
   "contracts/mine-game",
 ]

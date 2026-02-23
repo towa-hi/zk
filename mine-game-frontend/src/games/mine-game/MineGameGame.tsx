@@ -10,9 +10,10 @@ import type {
 import { MineGameSurface } from './MineGameSurface';
 import { createMineGameEngineAdapter } from './mineGameEngineAdapter';
 import { createMineGameContractAdapter } from './mineGameContractAdapter';
-import { computeCommitment } from './engine/commitment';
 import { buildProofPayload } from './engine/proofPayload';
-import { generateProof } from './services/MineGameNoirService';
+import { encodeLoadout } from './engine/sharedEncoding';
+import { generateProof } from './services/MineGameRisc0Service';
+import { computePoseidonCommitment } from './services/circomCommitment';
 
 const createRandomSessionId = (): number => {
   if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
@@ -130,7 +131,15 @@ export function MineGameGame({
     appendDebugLine(`Engine action requested from ${phase.toUpperCase()}`);
     if (phase === 'build') {
       const salt = `ui-auto-${Date.now()}`;
-      const predictedCommitment = computeCommitment(engineAdapter.getEngineState().loadout, salt);
+      const encodedLoadout = encodeLoadout(engineAdapter.getEngineState().loadout);
+      const predictedCommitment = (
+        await computePoseidonCommitment({
+          statementVersion: 2,
+          sessionId,
+          loadout: [...encodedLoadout],
+          salt,
+        })
+      ).commitmentTagged;
       setNotice({
         tone: 'info',
         message: 'Submitting commit_loadout and waiting for on-chain confirmation...',
@@ -180,15 +189,18 @@ export function MineGameGame({
 
       setNotice({
         tone: 'info',
-        message: 'Generating ZK proof... this may take a moment.',
+        message: 'Preparing Circom proof payload...',
       });
-      appendDebugLine('Starting Noir proof generation...');
+      appendDebugLine('Starting Circom payload generation...');
 
       try {
-        const { proofBlob, vkBytes } = await generateProof(payload);
+        const { proof, publicSignals, commitment } = await generateProof(payload);
 
-        appendDebugLine(`Proof generated (${proofBlob.length} bytes blob, ${vkBytes.length} bytes VK)`);
-        payload.noir = { proofBlob, vkBytes };
+        appendDebugLine(
+          `Payload generated (proof=${proof.length} fields, publicSignals=${publicSignals.length})`
+        );
+        payload.publicInputs.commitment = commitment;
+        payload.circom = { proof, publicSignals };
       } catch (error) {
         const msg = error instanceof Error ? error.message : 'Unknown proof generation error';
         appendDebugLine(`Proof generation failed: ${msg}`);

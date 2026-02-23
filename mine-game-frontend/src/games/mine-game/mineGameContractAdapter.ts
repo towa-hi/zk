@@ -32,7 +32,11 @@ export interface MineGameContractTransport {
 }
 
 function hexOrUtf8ToBuffer(value: string): Buffer {
-  const hex = value.startsWith('keccak_') ? value.slice('keccak_'.length) : value;
+  const hex = value.startsWith('keccak_')
+    ? value.slice('keccak_'.length)
+    : value.startsWith('poseidon_')
+      ? value.slice('poseidon_'.length)
+      : value;
   const isEvenHex = hex.length > 0 && hex.length % 2 === 0 && /^[0-9a-fA-F]+$/.test(hex);
   return isEvenHex ? Buffer.from(hex, 'hex') : Buffer.from(value, 'utf8');
 }
@@ -47,6 +51,19 @@ function toProofOutputs(payload: ProofPayload): ProofOutputs {
     outcome: payload.publicOutputs.outcome,
     evac_intensity: payload.publicOutputs.evacIntensity,
   };
+}
+
+function toBytes32FromSignal(signal: string): Buffer {
+  const value = signal.startsWith('0x') ? signal.slice(2) : BigInt(signal).toString(16);
+  const hex = value.padStart(64, '0').slice(-64);
+  return Buffer.from(hex, 'hex');
+}
+
+function encodeProofPayload(proof: string[]): Buffer {
+  if (proof.length !== 8) {
+    throw new Error(`Expected 8 Groth16 proof elements, got ${proof.length}`);
+  }
+  return Buffer.concat(proof.map((field) => toBytes32FromSignal(field)));
 }
 
 function extractResultError(result: unknown): string | null {
@@ -86,7 +103,7 @@ function createStellarTransport(contractId: string): MineGameContractTransport {
           },
           DEFAULT_METHOD_OPTIONS
         );
-        const sent = await signAndSendViaLaunchtube(tx, DEFAULT_METHOD_OPTIONS.timeoutInSeconds);
+        const sent = await signAndSendViaLaunchtube(tx as any, DEFAULT_METHOD_OPTIONS.timeoutInSeconds);
         const txError = extractResultError(sent.result);
         if (txError) {
           return {
@@ -129,7 +146,7 @@ function createStellarTransport(contractId: string): MineGameContractTransport {
           },
           DEFAULT_METHOD_OPTIONS
         );
-        const sent = await signAndSendViaLaunchtube(tx, DEFAULT_METHOD_OPTIONS.timeoutInSeconds);
+        const sent = await signAndSendViaLaunchtube(tx as any, DEFAULT_METHOD_OPTIONS.timeoutInSeconds);
         const txError = extractResultError(sent.result);
         if (txError) {
           return {
@@ -164,27 +181,28 @@ function createStellarTransport(contractId: string): MineGameContractTransport {
           signAuthEntry: signer.signAuthEntry,
         });
 
-        if (!payload.noir) {
+        if (!payload.circom) {
           return {
             ok: false,
             status: 'failed',
-            message: 'Missing Noir proof data (proofBlob and vkBytes)',
+            message: 'Missing Circom proof data (proof/publicSignals)',
           };
         }
 
         const commitment = hexOrUtf8ToBuffer(payload.publicInputs.commitment);
+        const circom = payload.circom;
         const tx = await client.submit_proof(
           {
             session_id: sessionId,
             player: playerAddress,
-            vk_json: Buffer.from(payload.noir.vkBytes),
-            proof_blob: Buffer.from(payload.noir.proofBlob),
+            proof_payload: encodeProofPayload(circom.proof),
+            public_inputs: circom.publicSignals.map((signal) => toBytes32FromSignal(signal)),
             submitted_commitment: commitment,
             public_outputs: toProofOutputs(payload),
           },
           DEFAULT_METHOD_OPTIONS
         );
-        const sent = await signAndSendViaLaunchtube(tx, DEFAULT_METHOD_OPTIONS.timeoutInSeconds);
+        const sent = await signAndSendViaLaunchtube(tx as any, DEFAULT_METHOD_OPTIONS.timeoutInSeconds);
         const txError = extractResultError(sent.result);
         if (txError) {
           return {

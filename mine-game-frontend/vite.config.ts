@@ -1,12 +1,26 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
+import wasm from 'vite-plugin-wasm'
+import { nodePolyfills } from 'vite-plugin-node-polyfills'
 import path from 'path'
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [
+    react(),
+    nodePolyfills({
+      include: ['buffer'],
+      globals: {
+        Buffer: true,
+        global: true,
+        process: true,
+      },
+    }),
+    wasm(),
+  ],
   envDir: '..',
   define: {
-    global: 'globalThis'
+    global: 'globalThis',
+    'process.env': '{}',
   },
   resolve: {
     alias: {
@@ -17,13 +31,13 @@ export default defineConfig({
   },
   optimizeDeps: {
     include: ['@stellar/stellar-sdk', '@stellar/stellar-sdk/contract', '@stellar/stellar-sdk/rpc', 'buffer'],
-    exclude: ['@aztec/bb.js'],
     esbuildOptions: {
       define: {
         global: 'globalThis'
       }
     }
   },
+  assetsInclude: ['**/*.wasm'],
   build: {
     commonjsOptions: {
       transformMixedEsModules: true
@@ -35,7 +49,7 @@ export default defineConfig({
     open: true,
     headers: {
       'Cross-Origin-Opener-Policy': 'same-origin',
-      'Cross-Origin-Embedder-Policy': 'require-corp',
+      'Cross-Origin-Embedder-Policy': 'credentialless',
     },
   }
 })
