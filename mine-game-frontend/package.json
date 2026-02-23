@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "build:docs": "tsc -b && vite build --outDir ../docs --emptyOutDir --base=/zk/",
     "lint": "eslint .",
     "preview": "vite preview"
   },

@@ -51,6 +51,7 @@ const CIRCLE_SEGMENTS = 96;
 const EPSILON = 1e-6;
 
 type Point = { x: number; y: number };
+type VoronoiCell = { nodeId: number; path: string; textureUrl?: string };
 
 const BIOME_TEXTURE: Record<string, string> = {
   magma_fields: magmaFieldsTexture,
@@ -172,7 +173,7 @@ export function BiomeTree({
     return m;
   }, [nodes]);
 
-  const voronoiCells = useMemo(() => {
+  const voronoiCells = useMemo<VoronoiCell[]>(() => {
     const baseCircle = makeCirclePolygon(CENTER, CENTER, OUTER_RADIUS, CIRCLE_SEGMENTS);
     const sites = nodes
       .map((node) => {
@@ -182,27 +183,28 @@ export function BiomeTree({
       })
       .filter((entry): entry is { node: PlanetNodeView; pos: Point } => entry != null);
 
-    return sites
-      .map(({ node, pos }) => {
-        let poly = baseCircle;
-        for (const other of sites) {
-          if (other.node.id === node.id) continue;
+    const cells: VoronoiCell[] = [];
+    for (const { node, pos } of sites) {
+      let poly = baseCircle;
+      for (const other of sites) {
+        if (other.node.id === node.id) continue;
 
-          const dx = other.pos.x - pos.x;
-          const dy = other.pos.y - pos.y;
-          const c = (other.pos.x * other.pos.x + other.pos.y * other.pos.y - pos.x * pos.x - pos.y * pos.y) / 2;
-          poly = clipPolygonToHalfPlane(poly, dx, dy, c);
-          if (poly.length < 3) break;
-        }
+        const dx = other.pos.x - pos.x;
+        const dy = other.pos.y - pos.y;
+        const c = (other.pos.x * other.pos.x + other.pos.y * other.pos.y - pos.x * pos.x - pos.y * pos.y) / 2;
+        poly = clipPolygonToHalfPlane(poly, dx, dy, c);
+        if (poly.length < 3) break;
+      }
 
-        if (poly.length < 3) return null;
-        return {
-          nodeId: node.id,
-          path: polygonToPath(poly),
-          textureUrl: BIOME_TEXTURE[node.biomeType] ?? null,
-        };
-      })
-      .filter((cell): cell is { nodeId: number; path: string; textureUrl: string | null } => cell != null);
+      if (poly.length < 3) continue;
+      cells.push({
+        nodeId: node.id,
+        path: polygonToPath(poly),
+        textureUrl: BIOME_TEXTURE[node.biomeType],
+      });
+    }
+
+    return cells;
   }, [nodes, posMap]);
 
   const hoveredPos = hoveredNode ? posMap.get(hoveredNode.id) : null;
@@ -238,7 +240,7 @@ export function BiomeTree({
                 height={64}
               >
                 <image
-                  href={cell.textureUrl ?? undefined}
+                  href={cell.textureUrl}
                   x={0}
                   y={0}
                   width={64}
